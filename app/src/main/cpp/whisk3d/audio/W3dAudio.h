@@ -1,0 +1,75 @@
+#ifndef W3D_AUDIO_H
+#define W3D_AUDIO_H
+
+#include <stddef.h> // size_t
+
+// ============================================================================
+//  Motor de AUDIO de Whisk3D. MODULO OPCIONAL (solo con -DW3D_ENABLE_AUDIO).
+//
+//  Arquitectura (la misma que usa Quake, y que corre hasta en el N95):
+//   - MIXER PORTABLE (en el Core): mezcla por software todas las voces activas a un
+//     stream PCM stereo 16-bit. Puro C++03: identico en todas las plataformas.
+//   - SALIDA por plataforma, FINA: solo le pide al mixer el proximo buffer.
+//       * web / linux / windows / android -> SDL2 audio (W3dAudioSDL.cpp)
+//       * Symbian (N95)                    -> CMdaAudioOutputStream (W3dAudioSymbian.cpp)
+//
+//  Un sonido se carga a memoria, se RESAMPLEA al rate del mixer y se guarda como
+//  stereo 16-bit; reproducirlo = agregar una "voz". Sirve para EFECTOS y para MUSICA
+//  (loop=true). Los bytes pueden venir de un archivo o de un .w3dpack cifrado
+//  (io/W3dPack.h) -> tambien podes proteger el audio.
+//
+//  Sin el flag, todas las funciones son stubs no-op: cero codigo, cero dependencias.
+// ============================================================================
+
+namespace w3dEngine {
+
+// Arranca el motor. sampleRate = frecuencia del mixer (44100 en desktop/web; 22050 en el
+// N95, mas liviano). false si el backend no pudo abrir el dispositivo (la app sigue muda).
+bool W3dAudioInit(int sampleRate);
+void W3dAudioShutdown();
+
+// Un sonido ya decodificado y resampleado al rate del mixer (stereo 16-bit en memoria).
+class W3dSound;
+
+// Carga un WAV (PCM 8/16-bit, mono/estereo, cualquier rate: se resamplea). NULL si falla.
+W3dSound* W3dSoundLoad(const char* path);
+// Igual, desde bytes EN MEMORIA (por ejemplo salidos de un .w3dpack).
+W3dSound* W3dSoundLoadMemory(const void* bytes, size_t len);
+// Genera un TONO de onda cuadrada (beep) al rate del mixer. freq en Hz, dur en ms, vol 0..1.
+// Copyright-free (matematica pura). Lo usa el juego para efectos estilo WhiskPaddle sin archivos de audio.
+W3dSound* W3dSoundBeep(float freq, int ms, float vol);
+void      W3dSoundFree(W3dSound* s);
+
+// Reproduce 's'. Devuelve un id de VOZ (>0) para pararla/ajustarla, o 0 si no hay lugar.
+// volume 0..1; loop=true para musica/ambiente (se repite hasta W3dSoundStop).
+int  W3dSoundPlay(W3dSound* s, float volume, bool loop);
+// Igual pero con PITCH: la voz avanza con paso fraccional 'pitch' (1.0 = normal, 0.5 = una
+// octava abajo, 2.0 = una arriba). Lo usa el bind lua sonido() para los pitchs de un juego
+// (rate_Hz = pitch/4096*11025 en el PSX -> factor pitch/1024 aca). Sin filtro: nearest,
+// suficiente para efectos (mismo caracter lo-fi que el original).
+int  W3dSoundPlayPitch(W3dSound* s, float volume, bool loop, float pitch);
+void W3dSoundStop(int voice);        // para una voz por su id (no-op si ya termino)
+// Corta la voz con una RAMPA lineal de 'fadeSeg' segundos (<= 0 -> ~5 ms, el minimo
+// anti-click). La rampa corre en el MIXER, por muestra, y al llegar a cero la voz se
+// libera sola. Cortar con W3dSoundStop clickea (la onda se corta en cualquier
+// amplitud); esta variante la baja a cero antes. Pensada para el SECUENCIADOR de
+// musica en lua: notas sostenidas = samples en loop que se apagan por nota.
+//   lua: h = sonido("nota.wav", vol, pitch)   -- ahora DEVUELVE el handle de voz
+//        pararSonido(h)                       -- corta con el fade default (~5 ms)
+//        pararSonido(h, 0.25)                 -- o con un release de 250 ms
+// El handle es el id (> 0) que devuelven W3dSoundPlay/W3dSoundPlayPitch; en lua,
+// sonido() devuelve nil si la voz NO sono (mute global, mixer cerrado, WAV faltante
+// o las 32 voces ocupadas) y pararSonido(nil) es un no-op seguro.
+void W3dSoundStopFade(int voice, float fadeSeg);
+void W3dSoundStopAll();
+void W3dSoundSetVolume(int voice, float volume);
+void W3dAudioMasterVolume(float v);  // volumen global 0..1 (master de usuario)
+void W3dAudioJuegoVolume(float v);   // volumen del JUEGO 0..1 (lo setea la tarjeta Juego; indep. del master)
+
+// Lo llama el BACKEND de salida para llenar su buffer (frames = pares L/R, stereo 16-bit).
+// Lo define el mixer del Core; corre en el hilo de audio (bajo exclusion del backend).
+void W3dAudioMix(short* stereoOut, int frames);
+
+} // namespace w3dEngine
+
+#endif

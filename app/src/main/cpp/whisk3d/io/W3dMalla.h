@@ -1,0 +1,165 @@
+#ifndef W3D_MALLA_H
+#define W3D_MALLA_H
+
+// ============================================================================
+//  .w3dm - EL FORMATO DE GEOMETRIA PROPIO DE WHISK3D (version 1 del lexico)
+//
+//  Texto plano por LINEAS, legible y editable a mano, pensado para que un N95 lo
+//  lea rapido y sin fragmentar el heap. Reemplaza al GLB como formato de
+//  GUARDADO de mallas (el GLB queda para importar/exportar a otros programas).
+//
+//  EL LEXICO, que es lo que sostiene todo. Se mira el PRIMER CARACTER de cada
+//  linea y con eso alcanza:
+//
+//      'A'..'Z'   ABRE UN BLOQUE. Se cierra con una linea "END" en la columna 0.
+//      'a'..'z'   DIRECTIVA de una sola linea: clave valor(es).
+//      ' ' o TAB  DATO (payload) del bloque abierto.
+//      '#'        comentario. Linea vacia: se ignora.
+//
+//  Ningun dato empieza con letra, asi que NUNCA hay ambiguedad y NUNCA hace
+//  falta contar bytes para saber donde termina un bloque. Esa es la propiedad
+//  que permite que un lector de hoy saltee (y PRESERVE) un bloque inventado
+//  dentro de tres anios sin entender absolutamente nada de el.
+//
+//  CABECERA DE BLOQUE:
+//      <NOMBRE> <cantidad> <dominio> [clave=valor ...] [nombre=<resto de linea>]
+//    - NOMBRE oficial [A-Z][A-Z0-9]*; experimental X.<quien>.<que> (X.PC2.PLIEGUE)
+//    - cantidad: cuantos ELEMENTOS trae -> se reserva la memoria DE UNA SOLA VEZ
+//    - dominio: punto | esquina | cara | arista | global (vocabulario CERRADO)
+//    - nombre= va SIEMPRE ULTIMO y toma el RESTO de la linea (asi un nombre con
+//      espacios no necesita comillas ni escapes)
+//
+//  EL "END" ES TOLERANTE: se le recortan los blancos de los dos bordes y se
+//  acepta en cualquier caja ("END", "END ", "end"). Un formato que se vende como
+//  editable a mano no puede tener una trampa en la que un espacio INVISIBLE deje
+//  el bloque abierto y se coma el resto del archivo.
+//
+//  LOS NOMBRES VUELVEN EXACTOS. Un nombre (el de la malla, el de una capa, el de
+//  un grupo, el de un mesh part, el de un material) va TAL CUAL hasta el fin de
+//  la linea, espacios de los bordes incluidos: son VINCULOS contra el
+//  proyecto.json, y recortarlos rompe el binding en silencio. El unico caracter
+//  que no se puede representar es el SALTO DE LINEA: el escritor lo cambia por un
+//  espacio y AVISA.
+//
+//  EL CHOQUE CONTRA EL "END", Y SU ESCAPE. PARTS es el UNICO bloque cuyo PAYLOAD
+//  es un nombre pelado (los demas o son numeros, o llevan el nombre en la
+//  cabecera con nombre=, o lo preceden con un indice). Un mesh part llamado "END"
+//  emitia la linea " END", el END tolerante la recortaba, el bloque se cerraba
+//  ahi y el "END" verdadero que venia despues se leia como una cabecera mal
+//  formada que se comia el bloque PARTMAT entero: la malla perdia las partes Y el
+//  vinculo a sus materiales. Por eso el payload de PARTS lleva ESCAPE: si el
+//  nombre recortado seria un END, o si ya empieza con '\', el escritor le antepone
+//  UN '\' y el lector le saca UNO. Es lossless, no ensancha el bloque (sigue
+//  siendo ancho 1) y se explica en una linea al que edita a mano. Un bloque NUEVO
+//  con nombres en el payload tiene que hacer lo mismo (o poner el nombre en la
+//  cabecera, que es lo preferible).
+//
+//  LA GEOMETRIA SUELTA NO SE SUELDA. El bloque V dedupea posiciones (por eso un
+//  cubo tiene 8 puntos y no 24), pero cada vertice/extremo SUELTO se lleva su
+//  punto propio aunque otro este parado exactamente ahi: dos vertices sueltos
+//  encimados son DOS, el editor no los une, y el archivo tampoco puede.
+//
+//  DOS ESPACIOS DE INDICES Y NADA MAS: 'punto' (posicion 3D unica, o sea el
+//  vertice que el usuario CUENTA: un cubo tiene 8) y 'esquina' (esquina de cara,
+//  numeradas recorriendo el bloque F). 'cara' y 'arista' se derivan. TODOS los
+//  indices arrancan en 0 (el .obj usa base 1 y eso es una fuente clasica de
+//  bugs; aca el lector escribe DIRECTO en el array destino sin sumar ni restar).
+//
+//  EL VERTICE DE RENDER NO ESTA EN EL ARCHIVO. En memoria MeshFace::idx indexa
+//  el array de render (un vertice por combinacion unica de pos+uv+normal+color),
+//  pero ese array NO se guarda: el merge que lo produce es una FUNCION PURA Y
+//  DETERMINISTA de posicion + UV activa + normal por esquina + color activo, con
+//  orden de PRIMERA APARICION recorriendo las caras. Los cuatro ingredientes son
+//  exactamente lo que el archivo guarda (V, la UV activa, NRM y la COL activa) y
+//  el orden lo fija el bloque F -> se reproduce BIT A BIT sin guardarlo. El
+//  bloque opcional RVMAP es solo un cache/ancla para las vertex animations.
+//
+//  QUE NO VA ACA: transform, jerarquia, materiales, modificadores, armatures (3D
+//  y 2D) y curvas de animacion viven en el proyecto.json; los keyframes de
+//  vertices en su blob binario. En el .w3dm va TODO lo que sobrevive a copiar la
+//  malla a otro proyecto, y nada mas.
+//
+//  C++03 puro. Este archivo entra en la build del JUEGO COMPILADO (Linux/
+//  Android/web/Symbian), asi que NO puede llamar a nada que viva en main/ (el
+//  editor): el lector deja la malla con sus DATOS y el que llama cierra con
+//  ReagruparMeshParts() + CalcularBordes() + AplicarCapasAlRender().
+// ============================================================================
+
+#include <string>
+#include <vector>
+#include <cstddef>
+
+class Mesh;
+
+// resultado de una lectura: todo lo que el que llama necesita saber y no cabe en
+// la malla misma.
+struct W3dMallaInfo {
+    // un renglon por problema, con el numero de linea. NUNCA se falla en
+    // silencio: la garantia que damos es "no se corrompe y siempre se avisa",
+    // NO "nunca se pierde".
+    //
+    // ACOTADA (kW3dmMaxAvisos): un .w3dm corrupto de 2 MB puede tener 200.000
+    // lineas malas y esta lista era LO UNICO del lector sin techo (200.001
+    // strings = decenas de MB de RSS por un archivo roto; en un N95 eso es el
+    // bad_alloc). Se guardan los PRIMEROS y se cuentan los demas en
+    // 'avisosDeMas': el ultimo renglon lo dice, asi que el techo no esconde nada.
+    std::vector<std::string> avisos;
+    int  avisosDeMas;  // avisos que NO entraron en la lista (0 = estan todos)
+    // nombre del MATERIAL de cada mesh part ("" = ninguno). El material vive en
+    // la escena y se referencia POR NOMBRE, nunca por indice: el Core no puede
+    // resolver el puntero, lo hace el que llama.
+    std::vector<std::string> materiales;
+    int  rverts;       // directiva "rverts" del archivo (-1 = ausente)
+    int  rvertsReales; // vertices de render que salieron del merge (-1 = no se cargo)
+    bool truncado;     // se acabo el archivo con un bloque abierto, o FALTA V/F
+    bool soloLectura;  // "requiere" nombra un bloque que este Whisk3D no conoce
+    W3dMallaInfo() : avisosDeMas(0), rverts(-1), rvertsReales(-1), truncado(false), soloLectura(false) {}
+};
+
+// techo de la lista de avisos (ver W3dMallaInfo::avisos)
+enum { kW3dmMaxAvisos = 200 };
+
+// escribe la malla completa en 'out' (se limpia primero). false = malla NULL.
+// DETERMINISTA: la misma malla da SIEMPRE los mismos bytes (round-trip estable).
+// 'avisos' (opcional) recibe un renglon por CADA cosa que no sale entera al
+// archivo. La perdida SILENCIOSA tambien es un bug: si algo no sobrevive, se dice.
+// Hoy son cinco:
+//   - un bloque de una version mas nueva que no se pudo conservar (cambio la topologia);
+//   - una capa UV/COL que no mide lo que la topologia dice (se saltea, y el indice de
+//     la capa ACTIVA se corrige a la lista realmente escrita);
+//   - un peso de vertex group que cae en un punto ya ocupado (dos control-points en la
+//     MISMA posicion: en el archivo son UN punto y gana el primero);
+//   - un borde SHARP o una costura SEAM cuya clave de POSICION ya no cae en ningun
+//     punto de la malla (la clave quedo stale porque se movio un vertice);
+//   - un nombre con salto de linea (partiria el archivo en dos): se sanea a un espacio.
+//
+// EL QUE LLAMA TIENE QUE MOSTRAR LOS AVISOS AL USUARIO, no solo loguearlos: "siempre
+// se avisa" no se cumple con una linea en un log que nadie abre.
+//
+// DEVUELVE false (y NO escribe nada) si la malla esta bajo el freno de mano
+// "requiere": ver W3dMallaBloqueQueFalta.
+bool W3dMallaEscribir(const Mesh* m, std::string& out, std::vector<std::string>* avisos = 0);
+
+// EL FRENO DE MANO. "" = la malla se puede guardar. Si no, devuelve el NOMBRE del
+// bloque que el archivo declaro obligatorio con "requiere" y esta version NO
+// entiende: guardar encima degradaria el archivo en silencio, que es exactamente
+// lo que esa directiva existe para impedir. Se consulta ANTES de escribir para
+// poder decirle al usuario CUAL es el bloque; W3dMallaEscribir lo vuelve a mirar
+// por su cuenta para que nadie pueda saltearse el freno.
+std::string W3dMallaBloqueQueFalta(const Mesh* m);
+
+// lee un .w3dm sobre 'm'. Reconstruye vertex/normals/uv/vertexColor/faces3d +
+// todas las capas. NO arma el index buffer ni los bordes: el que llama cierra
+// con ReagruparMeshParts() + CalcularBordes() + AplicarCapasAlRender().
+// false = ni siquiera es un .w3dm, o pide una version del lexico mas nueva, o NO
+// TRAE los bloques V y F que el propio formato declara obligatorios ("requiere V F").
+// En los tres casos la malla que entro NO SE TOCA: un archivo cortado justo en un
+// END (un zip copiado a medias) tiene que dejar la malla como estaba y avisar, jamas
+// vaciarla y devolver true.
+bool W3dMallaLeer(const char* datos, size_t n, Mesh* m, W3dMallaInfo* info);
+bool W3dMallaLeerTexto(const std::string& txt, Mesh* m, W3dMallaInfo* info);
+
+// true si el nombre es un bloque que ESTA version entiende (lo usa "requiere").
+bool W3dMallaBloqueConocido(const std::string& nombre);
+
+#endif
