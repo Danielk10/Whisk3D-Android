@@ -41,6 +41,9 @@
 // Android: el shim GL/gl.h trae el header de ES 1.1 (tipos y enums del backend fixed-function del core),
 // pero el contexto es ES 2.0 y se linkea libGLESv2, que exporta glGenerateMipmap (core en ES2). El header
 // de ES1 no lo declara -> se declara aca. (Sin esto no compilaba: "use of undeclared identifier".)
+#ifndef GL_API
+#define GL_API GL_APICALL
+#endif
 extern "C" GL_API void GL_APIENTRY glGenerateMipmap(GLenum target);
 #endif
 #include "w3dFilesystem.h" // lectura de archivos UNIFICADA del Core (asset del APK o archivo real)

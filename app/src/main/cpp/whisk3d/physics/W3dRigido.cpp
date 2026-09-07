@@ -19,10 +19,12 @@
 #include "base/w3dlog.h"
 #include <math.h>
 
+#ifdef W3D_WITH_LUA
 extern "C" {
 #include "lua.h"
 #include "lauxlib.h"
 }
+#endif
 
 // ---------------------------------------------------------------------------
 //  constantes de la simulacion
@@ -715,6 +717,7 @@ void W3dRigidosPaso(float dt) {
     }
 }
 
+#ifdef W3D_WITH_LUA
 // ---------------------------------------------------------------------------
 //  binds lua
 // ---------------------------------------------------------------------------
@@ -877,3 +880,6 @@ void W3dRigidosRegistrarBinds(void* Lv) {
     lua_pushcfunction(L, LFisicaActiva);   lua_setglobal(L, "fisicaActiva");
     lua_pushcfunction(L, LFisicaDespierto);lua_setglobal(L, "fisicaDespierto");
 }
+#else
+void W3dRigidosRegistrarBinds(void* /*Lv*/) {}
+#endif

@@ -58,6 +58,8 @@ set(WHISK3D_SOURCES
     ${WHISK3D_DIR}/io/W3dPack.cpp
     ${WHISK3D_DIR}/io/w3dCompress.cpp
     ${WHISK3D_DIR}/io/W3dTexto.cpp
+    ${WHISK3D_DIR}/objects/MeshRuntime.cpp
+    ${WHISK3D_DIR}/io/W3dRecursos.cpp
     ${WHISK3D_DIR}/physics/W3dFisica.cpp
     ${WHISK3D_DIR}/physics/W3dRigido.cpp
 )

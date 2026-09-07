@@ -8,10 +8,12 @@
 #include <vector>
 #include <math.h>
 
+#ifdef W3D_WITH_LUA
 extern "C" {
 #include "lua.h"
 #include "lauxlib.h"
 }
+#endif
 
 // ---------------------------------------------------------------------------
 //  CUERPO: el unico estado de la fisica. Un slot por objeto que se mueve (o al
@@ -324,6 +326,7 @@ static bool ReboteEnArea(W3dCuerpo* c, Object* area, const char* lados) {
     return hit;
 }
 
+#ifdef W3D_WITH_LUA
 // ===========================================================================
 //  BINDS LUA. Todos toleran nil y el tipo equivocado: los getters devuelven
 //  ceros y los setters/rebotes no hacen nada (devuelven false).
@@ -484,3 +487,6 @@ void W3dFisicaRegistrarBinds(void* Lv) {
     lua_pushcfunction(L, LRebotarEn);     lua_setglobal(L, "rebotarEn");
     lua_pushcfunction(L, LRebotarDentro); lua_setglobal(L, "rebotarDentro");
 }
+#else
+void W3dFisicaRegistrarBinds(void* /*Lv*/) {}
+#endif
