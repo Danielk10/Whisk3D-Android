@@ -72,6 +72,10 @@ private:
     bool touchDown_;
     float touchX_;
     float touchY_;
+    bool stickActive_;
+    int stickPointerId_;
+    float stickDeflectX_;
+    float stickDeflectY_;
     bool firePressed_;
     bool missilePressed_;
     float muzzleFlashTime_;

@@ -46,6 +46,10 @@ Renderer::Renderer(android_app *pApp) :
         touchDown_(false),
         touchX_(0.0f),
         touchY_(0.0f),
+        stickActive_(false),
+        stickPointerId_(-1),
+        stickDeflectX_(0.0f),
+        stickDeflectY_(0.0f),
         firePressed_(false),
         missilePressed_(false),
         muzzleFlashTime_(0.0f),
@@ -107,52 +111,103 @@ void Renderer::handleInput() {
     auto *inputBuffer = android_app_swap_input_buffers(app_);
     if (!inputBuffer) return;
 
+    float stickCenterX = 110.0f;
+    float stickCenterY = (height_ > 0) ? (height_ - 120.0f) : 400.0f;
+    float stickRadius = 85.0f;
+
+    float fireX0 = width_ - 150.0f, fireY0 = height_ - 150.0f;
+    float fireX1 = width_ - 10.0f,  fireY1 = height_ - 10.0f;
+
+    float mslX0 = width_ - 150.0f, mslY0 = height_ - 280.0f;
+    float mslX1 = width_ - 10.0f,  mslY1 = height_ - 150.0f;
+
     for (auto i = 0; i < inputBuffer->motionEventsCount; i++) {
         auto &motionEvent = inputBuffer->motionEvents[i];
         auto actionMasked = motionEvent.action & AMOTION_EVENT_ACTION_MASK;
         auto pointerIndex = (motionEvent.action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)
                 >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
-        auto &pointer = motionEvent.pointers[pointerIndex];
-        float x = GameActivityPointerAxes_getX(&pointer);
-        float y = GameActivityPointerAxes_getY(&pointer);
 
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             touchDown_ = true;
-            touchX_ = x;
-            touchY_ = y;
+            if (pointerIndex < motionEvent.pointerCount) {
+                auto &pointer = motionEvent.pointers[pointerIndex];
+                float px = GameActivityPointerAxes_getX(&pointer);
+                float py = GameActivityPointerAxes_getY(&pointer);
+                int pId = pointer.id;
 
-            if (x >= width_ * 0.5f) {
-                // Zona de botones derechos
-                // Boton FIRE: esquina inferior derecha (width_ - 140, height_ - 150, tamaño 110x110)
-                if (x >= width_ - 160 && y >= height_ - 170) {
-                    firePressed_ = true;
-                    muzzleFlashTime_ = 0.25f;
-                }
-                // Boton MISSILE: sobre boton FIRE (width_ - 160, height_ - 300)
-                else if (x >= width_ - 160 && y >= height_ - 300 && y < height_ - 170) {
-                    missilePressed_ = true;
-                    if (missileCount_ > 0) {
-                        missileCount_--;
-                        missileFlightTime_ = 1.8f;
+                if (px < width_ * 0.5f) {
+                    stickActive_ = true;
+                    stickPointerId_ = pId;
+                    float dx = px - stickCenterX;
+                    float dy = py - stickCenterY;
+                    stickDeflectX_ = CLAMP(dx / stickRadius, -1.0f, 1.0f);
+                    stickDeflectY_ = CLAMP(dy / stickRadius, -1.0f, 1.0f);
+                    planeRoll_  = stickDeflectX_ * 42.0f;
+                    planePitch_ = -stickDeflectY_ * 28.0f;
+                } else {
+                    if (px >= fireX0 && px <= fireX1 && py >= fireY0 && py <= fireY1) {
+                        firePressed_ = true;
+                        muzzleFlashTime_ = 0.2f;
+                    } else if (px >= mslX0 && px <= mslX1 && py >= mslY0 && py <= mslY1) {
+                        missilePressed_ = true;
+                        if (missileCount_ > 0 && missileFlightTime_ <= 0.0f) {
+                            missileCount_--;
+                            missileFlightTime_ = 1.6f;
+                        }
                     }
                 }
             }
         } else if (actionMasked == AMOTION_EVENT_ACTION_MOVE) {
-            touchX_ = x;
-            touchY_ = y;
-            if (x < width_ * 0.5f) {
-                // Stick virtual izquierdo
-                float stickCenterX = 100.0f;
-                float stickCenterY = height_ - 260.0f;
-                float dx = x - stickCenterX;
-                float dy = y - stickCenterY;
-                planeRoll_  = CLAMP(dx * 0.35f, -45.0f, 45.0f);
-                planePitch_ = CLAMP(-dy * 0.25f, -30.0f, 30.0f);
+            bool anyFire = false;
+            for (uint32_t p = 0; p < motionEvent.pointerCount; ++p) {
+                auto &pointer = motionEvent.pointers[p];
+                float px = GameActivityPointerAxes_getX(&pointer);
+                float py = GameActivityPointerAxes_getY(&pointer);
+                int pId = pointer.id;
+
+                if (pId == stickPointerId_ || (px < width_ * 0.5f && !stickActive_)) {
+                    stickActive_ = true;
+                    stickPointerId_ = pId;
+                    float dx = px - stickCenterX;
+                    float dy = py - stickCenterY;
+                    stickDeflectX_ = CLAMP(dx / stickRadius, -1.0f, 1.0f);
+                    stickDeflectY_ = CLAMP(dy / stickRadius, -1.0f, 1.0f);
+                    planeRoll_  = stickDeflectX_ * 42.0f;
+                    planePitch_ = -stickDeflectY_ * 28.0f;
+                } else if (px >= width_ * 0.5f) {
+                    if (px >= fireX0 && px <= fireX1 && py >= fireY0 && py <= fireY1) {
+                        anyFire = true;
+                    }
+                }
             }
-        } else if (actionMasked == AMOTION_EVENT_ACTION_UP || actionMasked == AMOTION_EVENT_ACTION_POINTER_UP) {
+            firePressed_ = anyFire;
+        } else if (actionMasked == AMOTION_EVENT_ACTION_UP || actionMasked == AMOTION_EVENT_ACTION_CANCEL) {
+            stickActive_ = false;
+            stickPointerId_ = -1;
+            stickDeflectX_ = 0.0f;
+            stickDeflectY_ = 0.0f;
             touchDown_ = false;
             firePressed_ = false;
             missilePressed_ = false;
+        } else if (actionMasked == AMOTION_EVENT_ACTION_POINTER_UP) {
+            if (pointerIndex < motionEvent.pointerCount) {
+                auto &pointer = motionEvent.pointers[pointerIndex];
+                int pId = pointer.id;
+                if (pId == stickPointerId_) {
+                    stickActive_ = false;
+                    stickPointerId_ = -1;
+                    stickDeflectX_ = 0.0f;
+                    stickDeflectY_ = 0.0f;
+                }
+                float px = GameActivityPointerAxes_getX(&pointer);
+                float py = GameActivityPointerAxes_getY(&pointer);
+                if (px >= fireX0 && px <= fireX1 && py >= fireY0 && py <= fireY1) {
+                    firePressed_ = false;
+                }
+                if (px >= mslX0 && px <= mslX1 && py >= mslY0 && py <= mslY1) {
+                    missilePressed_ = false;
+                }
+            }
         }
     }
     android_app_clear_motion_events(inputBuffer);
@@ -537,60 +592,109 @@ void Renderer::renderGameUI() {
         renderHUDQuad(rx, ry, reticleSize, reticleSize, texHudCrosshair_->getTextureID(), 0.9f);
     }
 
-    // 2. Radar Táctico / Minimapa (Esquina inferior izquierda)
+    // 2. Radar Táctico / Minimapa (Esquina superior izquierda)
     if (texHudRadar_) {
-        float radarSize = 140.0f;
-        renderHUDQuad(25.0f, height_ - radarSize - 25.0f, radarSize, radarSize, texHudRadar_->getTextureID(), 0.85f);
+        float radarSize = 120.0f;
+        renderHUDQuad(25.0f, 55.0f, radarSize, radarSize, texHudRadar_->getTextureID(), 0.88f);
     }
 
-    // 3. Stick Virtual de Vuelo (Esquina inferior izquierda, sobre el radar o a un lado)
+    // 3. Stick Virtual de Vuelo (Esquina inferior izquierda) con pomo desplazable
     if (texBtnStick_) {
-        float stickSize = 100.0f;
-        renderHUDQuad(180.0f, height_ - stickSize - 35.0f, stickSize, stickSize, texBtnStick_->getTextureID(), 0.75f);
+        float stickCenterX = 110.0f;
+        float stickCenterY = (height_ > 0) ? (height_ - 120.0f) : 400.0f;
+        // Base del stick
+        renderHUDQuad(stickCenterX - 55.0f, stickCenterY - 55.0f, 110.0f, 110.0f,
+                      texBtnStick_->getTextureID(), stickActive_ ? 0.95f : 0.65f);
+        // Pomo / Indicador de pulgar reactivo
+        float knobX = stickCenterX - 28.0f + (stickDeflectX_ * 32.0f);
+        float knobY = stickCenterY - 28.0f + (stickDeflectY_ * 32.0f);
+        renderHUDQuad(knobX, knobY, 56.0f, 56.0f,
+                      texBtnStick_->getTextureID(), stickActive_ ? 1.0f : 0.85f);
     }
 
     // 4. Botones Tácticos de Armamento (Esquina inferior derecha)
     // Botón de Cañón / Fuego
     if (texBtnFire_) {
-        float btnSize = 105.0f;
+        float fireW = 115.0f;
+        float fx = width_ - 145.0f;
+        float fy = height_ - 145.0f;
         float alpha = firePressed_ ? 1.0f : 0.85f;
-        renderHUDQuad(width_ - btnSize - 25.0f, height_ - btnSize - 25.0f, btnSize, btnSize, texBtnFire_->getTextureID(), alpha);
+        renderHUDQuad(fx, fy, fireW, fireW, texBtnFire_->getTextureID(), alpha);
     }
 
     // Botón de Misiles
     if (texBtnMissile_) {
-        float btnSize = 100.0f;
-        float alpha = missilePressed_ ? 1.0f : 0.85f;
-        renderHUDQuad(width_ - btnSize - 25.0f, height_ - btnSize - 145.0f, btnSize, btnSize, texBtnMissile_->getTextureID(), alpha);
+        float mslW = 105.0f;
+        float mx = width_ - 140.0f;
+        float my = height_ - 265.0f;
+        float alpha = (missileFlightTime_ > 0.0f || missilePressed_) ? 1.0f : 0.85f;
+        renderHUDQuad(mx, my, mslW, mslW, texBtnMissile_->getTextureID(), alpha);
     }
 
     // 5. Barras Digitales de Estado y Telemetría HUD
-    // Velocidad (Speed SPD: 480 KTS) - Superior Izquierda
-    renderHUDBar(25.0f, 30.0f, 150.0f, 14.0f, 0.80f, 0.0f, 0.9f, 0.8f, 0.9f);
+    // Velocidad (Speed SPD: 480 KTS) - Superior Izquierda al lado del radar
+    float speedPct = CLAMP((speedKnots_ - 380.0f) / 200.0f, 0.0f, 1.0f);
+    renderHUDBar(155.0f, 65.0f, 110.0f, 12.0f, speedPct, 0.0f, 0.9f, 0.8f, 0.9f);
 
-    // Altitud (Altitude ALT: 2,400 FT) - Superior Derecha
-    renderHUDBar(width_ - 175.0f, 30.0f, 150.0f, 14.0f, 0.65f, 0.0f, 0.85f, 1.0f, 0.9f);
+    // Altitud (Altitude ALT: 2,400 FT) - Superior Izquierda bajo velocidad
+    float altPct = CLAMP((altitudeFeet_ - 1500.0f) / 1800.0f, 0.0f, 1.0f);
+    renderHUDBar(155.0f, 85.0f, 110.0f, 12.0f, altPct, 0.0f, 0.85f, 1.0f, 0.9f);
 
     // Integridad del Casco (HULL 100%) - Centro Inferior
     float hullBarW = 200.0f;
     renderHUDBar((width_ - hullBarW) * 0.5f, height_ - 30.0f, hullBarW, 10.0f, healthPct_, 0.2f, 0.95f, 0.3f, 0.85f);
 
     // Objetivo Bloqueado - Banner Central Superior
-    float bannerW = 260.0f;
-    renderHUDBar((width_ - bannerW) * 0.5f, 35.0f, bannerW, 16.0f, 1.0f, 0.95f, 0.15f, 0.15f, 0.8f);
+    float bannerW = 240.0f;
+    renderHUDBar((width_ - bannerW) * 0.5f, 35.0f, bannerW, 14.0f, 1.0f, 0.95f, 0.15f, 0.15f, 0.85f);
 }
 
 void Renderer::renderWhisk3D() {
     timeSec_ += 0.01667f;
 
-    // Dinámica de vuelo automática cuando no hay toque directo
-    if (!touchDown_) {
-        planeRoll_  = std::sin(timeSec_ * 1.5f) * 16.0f;
-        planePitch_ = std::cos(timeSec_ * 0.9f) * 6.0f;
-        planeYaw_   = std::sin(timeSec_ * 0.7f) * 4.0f;
-        // Rafagas de ametralladora en demo
-        if (std::sin(timeSec_ * 4.0f) > 0.65f) {
-            muzzleFlashTime_ = 0.1f;
+    // Dinámica de vuelo y telemetría
+    if (stickActive_) {
+        planeX_ += (-planeRoll_ * 0.0035f);
+        planeY_ += (planePitch_ * 0.0030f);
+        planeYaw_ = -planeRoll_ * 0.26f;
+    } else {
+        // Estabilizador aerodinámico suave cuando se suelta el stick
+        planeRoll_  *= 0.92f;
+        planePitch_ *= 0.92f;
+        planeYaw_   *= 0.92f;
+        planeRoll_  += std::sin(timeSec_ * 1.5f) * 0.5f;
+        planePitch_ += std::cos(timeSec_ * 1.0f) * 0.25f;
+    }
+
+    // Límites de envolvente de vuelo
+    planeX_ = CLAMP(planeX_, -5.5f, 5.5f);
+    planeY_ = CLAMP(planeY_, -1.8f, 3.2f);
+
+    // Actualizar lecturas de telemetría digital
+    altitudeFeet_ = 2400.0f + (planeY_ * 300.0f);
+    speedKnots_   = 480.0f - (planePitch_ * 2.2f);
+
+    // Recarga de munición de misiles cada 8 segundos
+    if (missileCount_ < 4 && std::fmod(timeSec_, 8.0f) < 0.02f) {
+        missileCount_++;
+    }
+
+    // Desplazamiento del buque de combate enemigo
+    targetZ_ += 0.26f;
+    if (targetZ_ > 8.0f) {
+        // Buque rebasado, respawn más adelante
+        targetZ_ = -130.0f;
+        targetX_ = std::sin(timeSec_ * 0.6f) * 22.0f;
+    }
+
+    // Seguimiento y destrucción por misil
+    if (missileFlightTime_ > 0.0f) {
+        missileFlightTime_ -= 0.01667f;
+        if (missileFlightTime_ <= 0.0f) {
+            enemiesDestroyed_++;
+            targetZ_ = -140.0f;
+            targetX_ = std::cos(timeSec_ * 0.8f) * 20.0f;
+            muzzleFlashTime_ = 0.3f;
         }
     }
 
@@ -606,10 +710,15 @@ void Renderer::renderWhisk3D() {
     w3dEngine::LoadIdentity();
     w3dEngine::Perspective(55.0f, aspect, 0.1f, 500.0f);
 
-    // 3. Matriz ModelView de Cámara de persecución en 3ra persona
+    // 3. Matriz ModelView de Cámara de persecución en 3ra persona con seguimiento cinemático
+    float camLagX = planeX_ * 0.38f;
+    float camLagY = planeY_ * 0.25f;
+    float camBank = planeRoll_ * 0.14f;
+
     w3dEngine::MatrixMode(w3dEngine::ModelView);
     w3dEngine::LoadIdentity();
-    w3dEngine::Translatef(0.0f, -0.8f, -2.0f);
+    w3dEngine::Rotatef(-camBank, 0.0f, 0.0f, 1.0f);
+    w3dEngine::Translatef(-camLagX, -0.9f - camLagY, -2.0f);
 
     // 4. Estados 3D
     w3dEngine::Enable(w3dEngine::DepthTest);
