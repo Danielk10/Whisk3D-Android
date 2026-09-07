@@ -62,6 +62,8 @@ set(WHISK3D_SOURCES
     ${WHISK3D_DIR}/io/W3dRecursos.cpp
     ${WHISK3D_DIR}/physics/W3dFisica.cpp
     ${WHISK3D_DIR}/physics/W3dRigido.cpp
+    ${WHISK3D_DIR}/audio/W3dAudio.cpp
+    ${WHISK3D_DIR}/audio/W3dAudioAndroid.cpp
 )
 
 # Shared game library
@@ -79,6 +81,7 @@ target_compile_definitions(myapplication PRIVATE
     __ANDROID__
     W3D_WEBGL
     W3D_STB_IMPL
+    W3D_ENABLE_AUDIO
 )
 
 # Searches for game-activity package
@@ -94,6 +97,7 @@ target_link_libraries(myapplication
     EGL
     GLESv2
     GLESv3
+    OpenSLES
     jnigraphics
     android
     log

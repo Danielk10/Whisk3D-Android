@@ -12,6 +12,10 @@
 
 struct android_app;
 
+namespace w3dEngine {
+    class W3dSound;
+}
+
 class Renderer {
 public:
     explicit Renderer(android_app *pApp);
@@ -88,6 +92,15 @@ private:
     };
     std::vector<Bullet> bullets_;
 
+    // Audio State & Sounds
+    bool soundEnabled_;
+    int engineVoiceId_;
+    w3dEngine::W3dSound* sndEngine_;
+    w3dEngine::W3dSound* sndCannon_;
+    w3dEngine::W3dSound* sndMissile_;
+    w3dEngine::W3dSound* sndExplosion_;
+    w3dEngine::W3dSound* sndLock_;
+
     // Textures
     std::shared_ptr<TextureAsset> texAirplane_;
     std::shared_ptr<TextureAsset> texSea_;
@@ -98,6 +111,7 @@ private:
     std::shared_ptr<TextureAsset> texBtnFire_;
     std::shared_ptr<TextureAsset> texBtnMissile_;
     std::shared_ptr<TextureAsset> texBtnStick_;
+    std::shared_ptr<TextureAsset> texBtnSound_;
 };
 
 #endif // ANDROIDGLINVESTIGATIONS_RENDERER_H

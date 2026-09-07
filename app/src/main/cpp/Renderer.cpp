@@ -16,6 +16,7 @@
 #include "gfx/w3dGraphics.h"
 #include "io/w3dFilesystem.h"
 #include "physics/W3dFisica.h"
+#include "audio/W3dAudio.h"
 
 #define CLAMP(v, min_v, max_v) ((v) < (min_v) ? (min_v) : ((v) > (max_v) ? (max_v) : (v)))
 
@@ -53,11 +54,29 @@ Renderer::Renderer(android_app *pApp) :
         firePressed_(false),
         missilePressed_(false),
         muzzleFlashTime_(0.0f),
-        missileFlightTime_(0.0f) {
+        missileFlightTime_(0.0f),
+        soundEnabled_(true),
+        engineVoiceId_(0),
+        sndEngine_(nullptr),
+        sndCannon_(nullptr),
+        sndMissile_(nullptr),
+        sndExplosion_(nullptr),
+        sndLock_(nullptr) {
     initRenderer();
 }
 
 Renderer::~Renderer() {
+    if (engineVoiceId_ > 0) {
+        w3dEngine::W3dSoundStop(engineVoiceId_);
+        engineVoiceId_ = 0;
+    }
+    if (sndEngine_)    { w3dEngine::W3dSoundFree(sndEngine_); sndEngine_ = nullptr; }
+    if (sndCannon_)    { w3dEngine::W3dSoundFree(sndCannon_); sndCannon_ = nullptr; }
+    if (sndMissile_)   { w3dEngine::W3dSoundFree(sndMissile_); sndMissile_ = nullptr; }
+    if (sndExplosion_) { w3dEngine::W3dSoundFree(sndExplosion_); sndExplosion_ = nullptr; }
+    if (sndLock_)      { w3dEngine::W3dSoundFree(sndLock_); sndLock_ = nullptr; }
+    w3dEngine::W3dAudioShutdown();
+
     if (display_ != EGL_NO_DISPLAY) {
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (context_ != EGL_NO_CONTEXT) {
@@ -85,6 +104,23 @@ void Renderer::initWhisk3D() {
     // Inicializar backend GLES2 de Whisk3D
     w3dEngine::GLES2Init(nullptr);
 
+    // Inicializar motor de audio nativo de Whisk3D
+    if (w3dEngine::W3dAudioInit(44100)) {
+        aout << "Whisk3D: Motor de audio OpenSL ES inicializado (44.1 kHz stereo)!" << std::endl;
+        sndEngine_    = w3dEngine::W3dSoundLoad("sounds/engine.wav");
+        sndCannon_    = w3dEngine::W3dSoundLoad("sounds/cannon.wav");
+        sndMissile_   = w3dEngine::W3dSoundLoad("sounds/missile.wav");
+        sndExplosion_ = w3dEngine::W3dSoundLoad("sounds/explosion.wav");
+        sndLock_      = w3dEngine::W3dSoundLoad("sounds/lock.wav");
+
+        // Arrancar loop ambiental del motor a reacción
+        if (sndEngine_) {
+            engineVoiceId_ = w3dEngine::W3dSoundPlay(sndEngine_, 0.42f, true);
+        }
+    } else {
+        aout << "Whisk3D: No se pudo abrir backend de audio" << std::endl;
+    }
+
     // Cargar texturas del juego
     loadGameTextures();
 
@@ -105,6 +141,7 @@ void Renderer::loadGameTextures() {
     texBtnFire_      = TextureAsset::loadAsset(assetMgr, "textures/btn_fire.png");
     texBtnMissile_   = TextureAsset::loadAsset(assetMgr, "textures/btn_missile.png");
     texBtnStick_     = TextureAsset::loadAsset(assetMgr, "textures/btn_stick.png");
+    texBtnSound_     = TextureAsset::loadAsset(assetMgr, "textures/btn_sound.png");
 }
 
 void Renderer::handleInput() {
@@ -120,6 +157,9 @@ void Renderer::handleInput() {
 
     float mslX0 = width_ - 150.0f, mslY0 = height_ - 280.0f;
     float mslX1 = width_ - 10.0f,  mslY1 = height_ - 150.0f;
+
+    float sndBtnX = width_ - 70.0f, sndBtnY = 20.0f;
+    float sndBtnSize = 55.0f;
 
     for (auto i = 0; i < inputBuffer->motionEventsCount; i++) {
         auto &motionEvent = inputBuffer->motionEvents[i];
@@ -145,14 +185,27 @@ void Renderer::handleInput() {
                     planeRoll_  = stickDeflectX_ * 42.0f;
                     planePitch_ = -stickDeflectY_ * 28.0f;
                 } else {
-                    if (px >= fireX0 && px <= fireX1 && py >= fireY0 && py <= fireY1) {
+                    // Botón de Sonido Mute/Unmute
+                    if (px >= sndBtnX && px <= sndBtnX + sndBtnSize && py >= sndBtnY && py <= sndBtnY + sndBtnSize) {
+                        soundEnabled_ = !soundEnabled_;
+                        w3dEngine::W3dAudioMasterVolume(soundEnabled_ ? 1.0f : 0.0f);
+                        if (soundEnabled_ && sndLock_) {
+                            w3dEngine::W3dSoundPlay(sndLock_, 0.55f, false);
+                        }
+                    } else if (px >= fireX0 && px <= fireX1 && py >= fireY0 && py <= fireY1) {
                         firePressed_ = true;
                         muzzleFlashTime_ = 0.2f;
+                        if (sndCannon_) {
+                            w3dEngine::W3dSoundPlayPitch(sndCannon_, 0.55f, false, 0.96f + (rand() % 8) * 0.01f);
+                        }
                     } else if (px >= mslX0 && px <= mslX1 && py >= mslY0 && py <= mslY1) {
                         missilePressed_ = true;
                         if (missileCount_ > 0 && missileFlightTime_ <= 0.0f) {
                             missileCount_--;
                             missileFlightTime_ = 1.6f;
+                            if (sndMissile_) {
+                                w3dEngine::W3dSoundPlay(sndMissile_, 0.85f, false);
+                            }
                         }
                     }
                 }
@@ -647,6 +700,21 @@ void Renderer::renderGameUI() {
     // Objetivo Bloqueado - Banner Central Superior
     float bannerW = 240.0f;
     renderHUDBar((width_ - bannerW) * 0.5f, 35.0f, bannerW, 14.0f, 1.0f, 0.95f, 0.15f, 0.15f, 0.85f);
+
+    // 6. Botón Táctico de Audio / Sonido (Esquina superior derecha)
+    if (texBtnSound_) {
+        float sndX = width_ - 70.0f;
+        float sndY = 20.0f;
+        float sndSize = 52.0f;
+        float alpha = soundEnabled_ ? 0.95f : 0.40f;
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), alpha);
+        // Barra indicadora de estado
+        if (soundEnabled_) {
+            renderHUDBar(sndX + 4.0f, sndY + sndSize + 2.0f, sndSize - 8.0f, 4.0f, 1.0f, 0.1f, 0.95f, 0.4f, 0.9f);
+        } else {
+            renderHUDBar(sndX + 4.0f, sndY + sndSize + 2.0f, sndSize - 8.0f, 4.0f, 1.0f, 0.95f, 0.2f, 0.2f, 0.9f);
+        }
+    }
 }
 
 void Renderer::renderWhisk3D() {
@@ -695,6 +763,9 @@ void Renderer::renderWhisk3D() {
             targetZ_ = -140.0f;
             targetX_ = std::cos(timeSec_ * 0.8f) * 20.0f;
             muzzleFlashTime_ = 0.3f;
+            if (sndExplosion_) {
+                w3dEngine::W3dSoundPlay(sndExplosion_, 0.90f, false);
+            }
         }
     }
 
