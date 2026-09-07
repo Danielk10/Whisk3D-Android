@@ -3,6 +3,8 @@ plugins {
 }
 
 android {
+    // Redirigir la carpeta build a /tmp para mantener limpio el espacio de trabajo
+    project.layout.buildDirectory.set(file("/tmp/whisk3d"))
     namespace 'com.diamon.myapplication'
     compileSdk {
         version = release(37)

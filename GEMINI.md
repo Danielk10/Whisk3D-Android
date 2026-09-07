@@ -34,7 +34,13 @@ Para compilar e instalar directamente en un dispositivo o emulador conectado ví
 Después de una compilación exitosa, el archivo APK generado se encontrará en:
 
 ```
-app/build/outputs/apk/debug/app-debug.apk
+/tmp/whisk3d/outputs/apk/debug/app-debug.apk
+```
+
+Y para el paquete App Bundle (AAB):
+
+```
+/tmp/whisk3d/outputs/bundle/release/app-release.aab
 ```
 
 ## 4. Arquitectura y Tecnologías
