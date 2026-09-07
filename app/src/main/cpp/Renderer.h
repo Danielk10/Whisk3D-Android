@@ -16,6 +16,13 @@ namespace w3dEngine {
     class W3dSound;
 }
 
+enum GameState {
+    STATE_MAIN_MENU = 0,
+    STATE_PLAYING,
+    STATE_PAUSED,
+    STATE_GAME_OVER
+};
+
 class Renderer {
 public:
     explicit Renderer(android_app *pApp);
@@ -33,6 +40,7 @@ private:
     void updateRenderArea();
     void initWhisk3D();
     void loadGameTextures();
+    void resetMission();
 
     // 3D Scene Rendering
     void renderWhisk3D();
@@ -42,8 +50,12 @@ private:
     void renderTarget();
     void renderProjectiles();
 
-    // 2D HUD UI Rendering
+    // 2D HUD & Menu UI Rendering
     void renderGameUI();
+    void renderMainMenuUI();
+    void renderPauseUI();
+    void renderGameOverUI();
+    void renderDigits(float x, float y, float charW, float charH, const std::string& text);
     void renderHUDQuad(float x, float y, float w, float h, GLuint texId, float alpha = 1.0f);
     void renderHUDBar(float x, float y, float w, float h, float fillPct, float r, float g, float b, float a);
     void renderHUDRect(float x, float y, float w, float h, float r, float g, float b, float a);
@@ -59,6 +71,12 @@ private:
 
     bool shaderNeedsNewProjectionMatrix_;
     float timeSec_;
+
+    // Game State & Flow
+    GameState gameState_;
+    bool showHelpModal_;
+    int highScore_;
+    float flakCooldown_;
 
     // Player Flight Telemetry & Controls
     float planePitch_;
@@ -109,6 +127,13 @@ private:
     };
     std::vector<Bullet> bullets_;
 
+    struct EnemyBullet {
+        float x, y, z;
+        float vx, vy, vz;
+        float life;
+    };
+    std::vector<EnemyBullet> enemyBullets_;
+
     // Audio State & Sounds
     bool soundEnabled_;
     int engineVoiceId_;
@@ -118,7 +143,7 @@ private:
     w3dEngine::W3dSound* sndExplosion_;
     w3dEngine::W3dSound* sndLock_;
 
-    // Textures
+    // In-game 3D & HUD Textures
     std::shared_ptr<TextureAsset> texAirplane_;
     std::shared_ptr<TextureAsset> texSea_;
     std::shared_ptr<TextureAsset> texTerrain_;
@@ -129,6 +154,19 @@ private:
     std::shared_ptr<TextureAsset> texBtnMissile_;
     std::shared_ptr<TextureAsset> texBtnStick_;
     std::shared_ptr<TextureAsset> texBtnSound_;
+
+    // Menu UI Textures
+    std::shared_ptr<TextureAsset> texMenuTitle_;
+    std::shared_ptr<TextureAsset> texBtnPlay_;
+    std::shared_ptr<TextureAsset> texBtnResume_;
+    std::shared_ptr<TextureAsset> texBtnRestart_;
+    std::shared_ptr<TextureAsset> texBtnQuit_;
+    std::shared_ptr<TextureAsset> texBtnPause_;
+    std::shared_ptr<TextureAsset> texBtnHelp_;
+    std::shared_ptr<TextureAsset> texDialogHelp_;
+    std::shared_ptr<TextureAsset> texDialogPause_;
+    std::shared_ptr<TextureAsset> texDialogGameOver_;
+    std::shared_ptr<TextureAsset> texHudDigits_;
 };
 
 #endif // ANDROIDGLINVESTIGATIONS_RENDERER_H

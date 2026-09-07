@@ -31,6 +31,10 @@ Renderer::Renderer(android_app *pApp) :
         height_(0),
         shaderNeedsNewProjectionMatrix_(true),
         timeSec_(0.0f),
+        gameState_(STATE_MAIN_MENU),
+        showHelpModal_(false),
+        highScore_(0),
+        flakCooldown_(2.5f),
         planePitch_(0.0f),
         planeRoll_(0.0f),
         planeYaw_(0.0f),
@@ -44,7 +48,7 @@ Renderer::Renderer(android_app *pApp) :
         altitudeFeet_(2400.0f),
         healthPct_(1.0f),
         missileCount_(4),
-        enemiesDestroyed_(1),
+        enemiesDestroyed_(0),
         targetX_(0.0f),
         targetY_(-1.8f),
         targetZ_(-80.0f),
@@ -124,19 +128,43 @@ void Renderer::onWindowTerm() {
     }
 }
 
+void Renderer::resetMission() {
+    planeX_ = 0.0f;
+    planeY_ = 0.0f;
+    planePitch_ = 0.0f;
+    planeRoll_ = 0.0f;
+    planeYaw_ = 0.0f;
+    targetPitch_ = 0.0f;
+    targetRoll_ = 0.0f;
+    targetYaw_ = 0.0f;
+    healthPct_ = 1.0f;
+    missileCount_ = 4;
+    enemiesDestroyed_ = 0;
+    targetX_ = 0.0f;
+    targetY_ = -1.8f;
+    targetZ_ = -90.0f;
+    targetHealth_ = targetMaxHealth_;
+    bullets_.clear();
+    enemyBullets_.clear();
+    firePressed_ = false;
+    missilePressed_ = false;
+    stickActive_ = false;
+    missileFlightTime_ = 0.0f;
+    targetHitFlashTime_ = 0.0f;
+    muzzleFlashTime_ = 0.0f;
+    flakCooldown_ = 2.0f;
+}
+
 void Renderer::initWhisk3D() {
     aout << "Whisk3D: Inicializando motor y backend grafico GLES2/3..." << std::endl;
 
-    // Configurar sistema de archivos de Whisk3D para leer desde los assets del APK
     w3dFileSystem::SetAssetManager(app_->activity->assetManager);
     if (app_->activity->internalDataPath) {
         w3dFileSystem::SetUserDataDir(app_->activity->internalDataPath);
     }
 
-    // Inicializar backend GLES2 de Whisk3D
     w3dEngine::GLES2Init(nullptr);
 
-    // Inicializar motor de audio nativo de Whisk3D
     if (w3dEngine::W3dAudioInit(44100)) {
         aout << "Whisk3D: Motor de audio OpenSL ES inicializado (44.1 kHz stereo)!" << std::endl;
         sndEngine_    = w3dEngine::W3dSoundLoad("sounds/engine.wav");
@@ -145,46 +173,54 @@ void Renderer::initWhisk3D() {
         sndExplosion_ = w3dEngine::W3dSoundLoad("sounds/explosion.wav");
         sndLock_      = w3dEngine::W3dSoundLoad("sounds/lock.wav");
 
-        // Arrancar loop ambiental del motor a reacción
         if (sndEngine_) {
-            engineVoiceId_ = w3dEngine::W3dSoundPlay(sndEngine_, 0.42f, true);
+            engineVoiceId_ = w3dEngine::W3dSoundPlay(sndEngine_, 0.25f, true);
         }
     } else {
         aout << "Whisk3D: No se pudo abrir backend de audio" << std::endl;
     }
 
-    // Cargar texturas del juego
     loadGameTextures();
 
     aout << "Whisk3D: Escena y recursos listos!" << std::endl;
 }
 
 void Renderer::loadGameTextures() {
-    aout << "Whisk3D: Cargando texturas de Sky Strike..." << std::endl;
+    aout << "Whisk3D: Cargando texturas de Sky Strike y UI..." << std::endl;
     auto assetMgr = app_->activity->assetManager;
     if (!assetMgr) return;
 
+    // 3D Scene Textures
     texAirplane_     = TextureAsset::loadAsset(assetMgr, "textures/airplane.png");
     texSea_          = TextureAsset::loadAsset(assetMgr, "textures/sea.png");
     texTerrain_      = TextureAsset::loadAsset(assetMgr, "textures/terrain.png");
     texTarget_       = TextureAsset::loadAsset(assetMgr, "textures/target.png");
+
+    // In-game HUD Textures
     texHudCrosshair_ = TextureAsset::loadAsset(assetMgr, "textures/hud_crosshair.png");
     texHudRadar_     = TextureAsset::loadAsset(assetMgr, "textures/hud_radar.png");
     texBtnFire_      = TextureAsset::loadAsset(assetMgr, "textures/btn_fire.png");
     texBtnMissile_   = TextureAsset::loadAsset(assetMgr, "textures/btn_missile.png");
     texBtnStick_     = TextureAsset::loadAsset(assetMgr, "textures/btn_stick.png");
     texBtnSound_     = TextureAsset::loadAsset(assetMgr, "textures/btn_sound.png");
+
+    // Menu UI Textures
+    texMenuTitle_      = TextureAsset::loadAsset(assetMgr, "textures/menu_title.png");
+    texBtnPlay_        = TextureAsset::loadAsset(assetMgr, "textures/btn_play.png");
+    texBtnResume_      = TextureAsset::loadAsset(assetMgr, "textures/btn_resume.png");
+    texBtnRestart_     = TextureAsset::loadAsset(assetMgr, "textures/btn_restart.png");
+    texBtnQuit_        = TextureAsset::loadAsset(assetMgr, "textures/btn_quit.png");
+    texBtnPause_       = TextureAsset::loadAsset(assetMgr, "textures/btn_pause.png");
+    texBtnHelp_        = TextureAsset::loadAsset(assetMgr, "textures/btn_help.png");
+    texDialogHelp_     = TextureAsset::loadAsset(assetMgr, "textures/dialog_help.png");
+    texDialogPause_    = TextureAsset::loadAsset(assetMgr, "textures/dialog_pause.png");
+    texDialogGameOver_ = TextureAsset::loadAsset(assetMgr, "textures/dialog_gameover.png");
+    texHudDigits_      = TextureAsset::loadAsset(assetMgr, "textures/hud_digits.png");
 }
 
 void Renderer::handleInput() {
     auto *inputBuffer = android_app_swap_input_buffers(app_);
     if (!inputBuffer) return;
-
-    float fireX0 = width_ - 145.0f, fireY0 = height_ - 145.0f;
-    float fireX1 = width_ - 15.0f,  fireY1 = height_ - 15.0f;
-
-    float mslX0 = width_ - 145.0f, mslY0 = height_ - 265.0f;
-    float mslX1 = width_ - 15.0f,  mslY1 = height_ - 150.0f;
 
     float sndBtnX = width_ - 70.0f, sndBtnY = 20.0f;
     float sndBtnSize = 55.0f;
@@ -195,6 +231,141 @@ void Renderer::handleInput() {
         auto pointerIndex = (motionEvent.action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK)
                 >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT;
 
+        // -------------------------------------------------------------
+        // 1. MANEJO DE ENTRADA EN MENÚ PRINCIPAL
+        // -------------------------------------------------------------
+        if (gameState_ == STATE_MAIN_MENU) {
+            if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
+                if (pointerIndex < motionEvent.pointerCount) {
+                    auto &pointer = motionEvent.pointers[pointerIndex];
+                    float px = GameActivityPointerAxes_getX(&pointer);
+                    float py = GameActivityPointerAxes_getY(&pointer);
+
+                    if (showHelpModal_) {
+                        // Tocar en el botón cerrar o en cualquier parte cierra el diálogo de ayuda
+                        showHelpModal_ = false;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.6f, false);
+                    } else {
+                        // Botón de sonido
+                        if (px >= sndBtnX && px <= sndBtnX + sndBtnSize && py >= sndBtnY && py <= sndBtnY + sndBtnSize) {
+                            soundEnabled_ = !soundEnabled_;
+                            w3dEngine::W3dAudioMasterVolume(soundEnabled_ ? 1.0f : 0.0f);
+                            if (soundEnabled_ && sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.55f, false);
+                        }
+                        // Botón JUGAR / DESPEGAR
+                        float btnW = 340.0f, btnH = 80.0f;
+                        float bx = (width_ - btnW) * 0.5f;
+                        float by = height_ * 0.52f - 20.0f;
+                        if (px >= bx && px <= bx + btnW && py >= by && py <= by + btnH) {
+                            resetMission();
+                            gameState_ = STATE_PLAYING;
+                            if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.85f, false);
+                        }
+                        // Botón AYUDA (?)
+                        float hSize = 58.0f;
+                        float hx = (width_ + 340.0f) * 0.5f + 15.0f;
+                        float hy = height_ * 0.52f - 10.0f;
+                        if (px >= hx && px <= hx + hSize && py >= hy && py <= hy + hSize) {
+                            showHelpModal_ = true;
+                            if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.65f, false);
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        // -------------------------------------------------------------
+        // 2. MANEJO DE ENTRADA EN MENÚ DE PAUSA
+        // -------------------------------------------------------------
+        if (gameState_ == STATE_PAUSED) {
+            if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
+                if (pointerIndex < motionEvent.pointerCount) {
+                    auto &pointer = motionEvent.pointers[pointerIndex];
+                    float px = GameActivityPointerAxes_getX(&pointer);
+                    float py = GameActivityPointerAxes_getY(&pointer);
+
+                    // Botón de sonido
+                    if (px >= sndBtnX && px <= sndBtnX + sndBtnSize && py >= sndBtnY && py <= sndBtnY + sndBtnSize) {
+                        soundEnabled_ = !soundEnabled_;
+                        w3dEngine::W3dAudioMasterVolume(soundEnabled_ ? 1.0f : 0.0f);
+                        if (soundEnabled_ && sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.55f, false);
+                    }
+
+                    float dlgH = 320.0f;
+                    float dy = (height_ - dlgH) * 0.5f;
+                    float btnW = 270.0f, btnH = 55.0f;
+                    float bx = (width_ - btnW) * 0.5f;
+
+                    // Continuar
+                    float by1 = dy + 105.0f;
+                    if (px >= bx && px <= bx + btnW && py >= by1 && py <= by1 + btnH) {
+                        gameState_ = STATE_PLAYING;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.7f, false);
+                    }
+                    // Reiniciar
+                    float by2 = dy + 172.0f;
+                    if (px >= bx && px <= bx + btnW && py >= by2 && py <= by2 + btnH) {
+                        resetMission();
+                        gameState_ = STATE_PLAYING;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.8f, false);
+                    }
+                    // Salir al menú
+                    float by3 = dy + 238.0f;
+                    if (px >= bx && px <= bx + btnW && py >= by3 && py <= by3 + btnH) {
+                        gameState_ = STATE_MAIN_MENU;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.7f, false);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // -------------------------------------------------------------
+        // 3. MANEJO DE ENTRADA EN FIN DE PARTIDA / GAME OVER
+        // -------------------------------------------------------------
+        if (gameState_ == STATE_GAME_OVER) {
+            if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
+                if (pointerIndex < motionEvent.pointerCount) {
+                    auto &pointer = motionEvent.pointers[pointerIndex];
+                    float px = GameActivityPointerAxes_getX(&pointer);
+                    float py = GameActivityPointerAxes_getY(&pointer);
+
+                    float dlgH = 340.0f;
+                    float dy = (height_ - dlgH) * 0.5f;
+                    float btnW = 270.0f, btnH = 55.0f;
+                    float bx = (width_ - btnW) * 0.5f;
+
+                    // Reintentar
+                    float by1 = dy + 185.0f;
+                    if (px >= bx && px <= bx + btnW && py >= by1 && py <= by1 + btnH) {
+                        resetMission();
+                        gameState_ = STATE_PLAYING;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.8f, false);
+                    }
+                    // Menú principal
+                    float by2 = dy + 252.0f;
+                    if (px >= bx && px <= bx + btnW && py >= by2 && py <= by2 + btnH) {
+                        gameState_ = STATE_MAIN_MENU;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.7f, false);
+                    }
+                }
+            }
+            continue;
+        }
+
+        // -------------------------------------------------------------
+        // 4. MANEJO DE ENTRADA DURANTE EL JUEGO (STATE_PLAYING)
+        // -------------------------------------------------------------
+        float fireX0 = width_ - 145.0f, fireY0 = height_ - 145.0f;
+        float fireX1 = width_ - 15.0f,  fireY1 = height_ - 15.0f;
+
+        float mslX0 = width_ - 145.0f, mslY0 = height_ - 265.0f;
+        float mslX1 = width_ - 15.0f,  mslY1 = height_ - 150.0f;
+
+        float pauseBtnX = width_ - 130.0f, pauseBtnY = 20.0f;
+        float pauseBtnSize = 52.0f;
+
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             touchDown_ = true;
             if (pointerIndex < motionEvent.pointerCount) {
@@ -204,7 +375,7 @@ void Renderer::handleInput() {
                 int pId = pointer.id;
 
                 if (px < width_ * 0.5f) {
-                    // Floating dynamic flight stick anchors wherever touched
+                    // Joystick flotante anclado en la posición de toque
                     stickActive_ = true;
                     stickPointerId_ = pId;
                     stickOriginX_ = px;
@@ -212,8 +383,15 @@ void Renderer::handleInput() {
                     stickDeflectX_ = 0.0f;
                     stickDeflectY_ = 0.0f;
                 } else {
+                    // Botón de Pausa
+                    if (px >= pauseBtnX && px <= pauseBtnX + pauseBtnSize && py >= pauseBtnY && py <= pauseBtnY + pauseBtnSize) {
+                        gameState_ = STATE_PAUSED;
+                        firePressed_ = false;
+                        stickActive_ = false;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.65f, false);
+                    }
                     // Botón de Sonido Mute/Unmute
-                    if (px >= sndBtnX && px <= sndBtnX + sndBtnSize && py >= sndBtnY && py <= sndBtnY + sndBtnSize) {
+                    else if (px >= sndBtnX && px <= sndBtnX + sndBtnSize && py >= sndBtnY && py <= sndBtnY + sndBtnSize) {
                         soundEnabled_ = !soundEnabled_;
                         w3dEngine::W3dAudioMasterVolume(soundEnabled_ ? 1.0f : 0.0f);
                         if (soundEnabled_ && sndLock_) {
@@ -323,7 +501,7 @@ void Renderer::renderSkyAndOcean() {
     w3dEngine::DrawTrianglesArray(6);
     w3dEngine::DisableArray(w3dEngine::ColorArray);
 
-    // 2. Océano 3D con malla subdividida 8x10 para evitar distorsión de perspectiva UV
+    // 2. Océano 3D con malla subdividida 8x10
     if (texSea_) {
         float waveShift = timeSec_ * 0.15f;
         const int gridX = 8;
@@ -350,7 +528,6 @@ void Renderer::renderSkyAndOcean() {
                 float u0 = (float)i / gridX * 14.0f;
                 float u1 = (float)(i + 1) / gridX * 14.0f;
 
-                // Triangle 1
                 oceanVerts.insert(oceanVerts.end(), {
                     x0, -2.5f, z0,
                     x1, -2.5f, z0,
@@ -362,7 +539,6 @@ void Renderer::renderSkyAndOcean() {
                     u1, v1
                 });
 
-                // Triangle 2
                 oceanVerts.insert(oceanVerts.end(), {
                     x0, -2.5f, z0,
                     x1, -2.5f, z1,
@@ -397,26 +573,18 @@ void Renderer::renderIslands() {
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
-    // Isla Principal Volcánica (Costa izquierda)
+    // Isla Principal Volcánica
     w3dEngine::PushMatrix();
     w3dEngine::Translatef(-38.0f, -2.5f, -95.0f);
 
     static const float islandVerts[] = {
-        // Cuña 1
         0.0f, 10.5f, 0.0f,   18.0f, 0.0f, 0.0f,    13.0f, 0.0f, 14.0f,
-        // Cuña 2
         0.0f, 10.5f, 0.0f,   13.0f, 0.0f, 14.0f,    0.0f, 0.0f, 20.0f,
-        // Cuña 3
         0.0f, 10.5f, 0.0f,    0.0f, 0.0f, 20.0f,  -15.0f, 0.0f, 15.0f,
-        // Cuña 4
         0.0f, 10.5f, 0.0f,  -15.0f, 0.0f, 15.0f,  -21.0f, 0.0f, 0.0f,
-        // Cuña 5
         0.0f, 10.5f, 0.0f,  -21.0f, 0.0f, 0.0f,   -14.0f, 0.0f, -17.0f,
-        // Cuña 6
         0.0f, 10.5f, 0.0f,  -14.0f, 0.0f, -17.0f,   0.0f, 0.0f, -22.0f,
-        // Cuña 7
         0.0f, 10.5f, 0.0f,    0.0f, 0.0f, -22.0f,  15.0f, 0.0f, -14.0f,
-        // Cuña 8
         0.0f, 10.5f, 0.0f,   15.0f, 0.0f, -14.0f,  18.0f, 0.0f, 0.0f
     };
     static const float islandUVs[] = {
@@ -476,43 +644,31 @@ void Renderer::renderTarget() {
     // Buque de combate naval enemigo (DDG-88) con orientación proa a -Z
     static const float shipVerts[] = {
         // --- 1. Cubierta Superior (Deck) ---
-        // Proa triangular apuntando hacia adelante (-Z)
          0.0f,  1.2f, -10.0f,   -2.8f,  1.2f,  -4.0f,    2.8f,  1.2f,  -4.0f,
-        // Casco medio y popa con helipuerto
         -2.8f,  1.2f,  -4.0f,   -2.8f,  1.2f,   8.0f,    2.8f,  1.2f,   8.0f,
         -2.8f,  1.2f,  -4.0f,    2.8f,  1.2f,   8.0f,    2.8f,  1.2f,  -4.0f,
 
-        // --- 2. Costados del Casco y Línea de Flotación (y = -1.2f) ---
-        // Amura de babor (Port bow)
+        // --- 2. Costados del Casco y Línea de Flotación ---
         -2.8f,  1.2f,  -4.0f,    0.0f,  1.2f, -10.0f,    0.0f, -1.2f, -10.0f,
         -2.8f,  1.2f,  -4.0f,    0.0f, -1.2f, -10.0f,   -2.8f, -1.2f,  -4.0f,
-        // Amura de estribor (Starboard bow)
          0.0f,  1.2f, -10.0f,    2.8f,  1.2f,  -4.0f,    2.8f, -1.2f,  -4.0f,
          0.0f,  1.2f, -10.0f,    2.8f, -1.2f,  -4.0f,    0.0f, -1.2f, -10.0f,
-        // Costado de babor (Port flank)
         -2.8f,  1.2f,  -4.0f,   -2.8f, -1.2f,  -4.0f,   -2.8f, -1.2f,   8.0f,
         -2.8f,  1.2f,  -4.0f,   -2.8f, -1.2f,   8.0f,   -2.8f,  1.2f,   8.0f,
-        // Costado de estribor (Starboard flank)
          2.8f,  1.2f,  -4.0f,    2.8f,  1.2f,   8.0f,    2.8f, -1.2f,   8.0f,
          2.8f,  1.2f,  -4.0f,    2.8f, -1.2f,   8.0f,    2.8f, -1.2f,  -4.0f,
-        // Espejo de popa (Stern transom)
         -2.8f,  1.2f,   8.0f,    2.8f,  1.2f,   8.0f,    2.8f, -1.2f,   8.0f,
         -2.8f,  1.2f,   8.0f,    2.8f, -1.2f,   8.0f,   -2.8f, -1.2f,   8.0f,
 
         // --- 3. Superestructura / Castillo de Mando (Bridge) ---
-        // Techo de la torre
         -1.4f,  3.5f,  -1.2f,    1.4f,  3.5f,  -1.2f,    1.4f,  3.5f,   2.5f,
         -1.4f,  3.5f,  -1.2f,    1.4f,  3.5f,   2.5f,   -1.4f,  3.5f,   2.5f,
-        // Pared frontal del puente
         -1.4f,  3.5f,  -1.2f,    1.4f,  1.2f,  -1.2f,    1.4f,  3.5f,  -1.2f,
         -1.4f,  3.5f,  -1.2f,   -1.4f,  1.2f,  -1.2f,    1.4f,  1.2f,  -1.2f,
-        // Pared babor
         -1.4f,  3.5f,  -1.2f,   -1.4f,  3.5f,   2.5f,   -1.4f,  1.2f,   2.5f,
         -1.4f,  3.5f,  -1.2f,   -1.4f,  1.2f,   2.5f,   -1.4f,  1.2f,  -1.2f,
-        // Pared estribor
          1.4f,  3.5f,  -1.2f,    1.4f,  1.2f,   2.5f,    1.4f,  3.5f,   2.5f,
          1.4f,  3.5f,  -1.2f,    1.4f,  1.2f,  -1.2f,    1.4f,  1.2f,   2.5f,
-        // Pared trasera
         -1.4f,  3.5f,   2.5f,    1.4f,  3.5f,   2.5f,    1.4f,  1.2f,   2.5f,
         -1.4f,  3.5f,   2.5f,    1.4f,  1.2f,   2.5f,   -1.4f,  1.2f,   2.5f
     };
@@ -524,13 +680,13 @@ void Renderer::renderTarget() {
         0.55f, 0.60f,   0.55f, 0.95f,   0.95f, 0.95f,
         0.55f, 0.60f,   0.95f, 0.95f,   0.95f, 0.60f,
 
-        // Casco amuras con línea de flotación roja en V = [0.0, 0.12]
+        // Casco amuras con línea de flotación roja
         0.10f, 0.45f,   0.45f, 0.45f,   0.45f, 0.05f,
         0.10f, 0.45f,   0.45f, 0.05f,   0.10f, 0.05f,
         0.45f, 0.45f,   0.85f, 0.45f,   0.85f, 0.05f,
         0.45f, 0.45f,   0.85f, 0.05f,   0.45f, 0.05f,
 
-        // Costados de casco (Placas de acero naval blindado)
+        // Costados de casco (Placas de acero blindado)
         0.10f, 0.45f,   0.10f, 0.05f,   0.85f, 0.05f,
         0.10f, 0.45f,   0.85f, 0.05f,   0.85f, 0.45f,
         0.10f, 0.45f,   0.85f, 0.45f,   0.85f, 0.05f,
@@ -544,7 +700,7 @@ void Renderer::renderTarget() {
         0.25f, 0.65f,   0.75f, 0.65f,   0.75f, 0.85f,
         0.25f, 0.65f,   0.75f, 0.85f,   0.25f, 0.85f,
 
-        // Puente frontal (Ventanales de mando de la torre)
+        // Puente frontal (Ventanales)
         0.20f, 0.45f,   0.80f, 0.25f,   0.80f, 0.45f,
         0.20f, 0.45f,   0.20f, 0.25f,   0.80f, 0.25f,
 
@@ -574,15 +730,10 @@ void Renderer::renderAircraft() {
     if (!texAirplane_) return;
 
     w3dEngine::PushMatrix();
-    // Posición del caza frente a la cámara en persecución
     w3dEngine::Translatef(planeX_, planeY_ - 0.5f, -6.5f);
 
-    // Rotaciones de vuelo aerodinámicas:
-    // Balanceo (Roll): inclinación al virar
     w3dEngine::Rotatef(-planeRoll_,  0.0f, 0.0f, 1.0f);
-    // Cabeceo (Pitch): cabeceo hacia arriba/abajo (eje X)
     w3dEngine::Rotatef(planePitch_,  1.0f, 0.0f, 0.0f);
-    // Guiñada (Yaw): nariz vira hacia la dirección de giro
     w3dEngine::Rotatef(-planeYaw_,   0.0f, 1.0f, 0.0f);
 
     w3dEngine::Enable(w3dEngine::Texture2D);
@@ -591,92 +742,81 @@ void Renderer::renderAircraft() {
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
-    // Modelo 3D del Caza de Combate orientado hacia adelante (-Z hacia el horizonte)
+    // Modelo 3D del Caza apuntando hacia adelante (-Z)
     static const float jetVerts[] = {
-        // --- 1. Morro / Nariz aerodinámica (Nose Cone hacia -Z) ---
-         0.0f,  0.0f, -2.8f,   -0.38f,  0.0f, -1.1f,    0.0f,  0.18f, -1.1f, // Morro superior izq
-         0.0f,  0.0f, -2.8f,    0.0f,  0.18f, -1.1f,    0.38f,  0.0f, -1.1f, // Morro superior der
-         0.0f,  0.0f, -2.8f,    0.0f, -0.16f, -1.1f,   -0.38f,  0.0f, -1.1f, // Morro inferior izq
-         0.0f,  0.0f, -2.8f,    0.38f,  0.0f, -1.1f,    0.0f, -0.16f, -1.1f, // Morro inferior der
+        // --- 1. Morro / Nariz aerodinámica ---
+         0.0f,  0.0f, -2.8f,   -0.38f,  0.0f, -1.1f,    0.0f,  0.18f, -1.1f,
+         0.0f,  0.0f, -2.8f,    0.0f,  0.18f, -1.1f,    0.38f,  0.0f, -1.1f,
+         0.0f,  0.0f, -2.8f,    0.0f, -0.16f, -1.1f,   -0.38f,  0.0f, -1.1f,
+         0.0f,  0.0f, -2.8f,    0.38f,  0.0f, -1.1f,    0.0f, -0.16f, -1.1f,
 
-        // --- 2. Cúpula de la Cabina (Cockpit Glass Bubble) ---
-         0.0f,  0.18f, -1.1f,  -0.22f,  0.18f, -0.2f,    0.0f,  0.46f, -0.2f, // Parabrisas izq
-         0.0f,  0.18f, -1.1f,   0.0f,  0.46f, -0.2f,    0.22f,  0.18f, -0.2f, // Parabrisas der
-         0.0f,  0.46f, -0.2f,  -0.22f,  0.18f, -0.2f,    0.0f,  0.22f,  0.6f, // Cristal popa izq
-         0.0f,  0.46f, -0.2f,   0.0f,  0.22f,  0.6f,    0.22f,  0.18f, -0.2f, // Cristal popa der
+        // --- 2. Cúpula de la Cabina (Cockpit Bubble) ---
+         0.0f,  0.18f, -1.1f,  -0.22f,  0.18f, -0.2f,    0.0f,  0.46f, -0.2f,
+         0.0f,  0.18f, -1.1f,   0.0f,  0.46f, -0.2f,    0.22f,  0.18f, -0.2f,
+         0.0f,  0.46f, -0.2f,  -0.22f,  0.18f, -0.2f,    0.0f,  0.22f,  0.6f,
+         0.0f,  0.46f, -0.2f,   0.0f,  0.22f,  0.6f,    0.22f,  0.18f, -0.2f,
 
         // --- 3. Fuselaje Central Dorsal y Vientre ---
-        // Dorso superior del fuselaje
         -0.42f, 0.16f, -1.1f,  -0.52f, 0.16f,  1.6f,    0.52f, 0.16f,  1.6f,
         -0.42f, 0.16f, -1.1f,   0.52f, 0.16f,  1.6f,    0.42f, 0.16f, -1.1f,
-        // Vientre inferior del fuselaje
         -0.42f,-0.16f, -1.1f,   0.52f,-0.16f,  1.6f,   -0.52f,-0.16f,  1.6f,
         -0.42f,-0.16f, -1.1f,   0.42f,-0.16f, -1.1f,    0.52f,-0.16f,  1.6f,
 
-        // --- 4. Alas Delta en Flecha (Swept Delta Wings) ---
-        // Ala izquierda (Superficie Superior)
+        // --- 4. Alas Delta en Flecha ---
         -0.42f, 0.05f, -0.7f,  -3.2f,  0.02f,  1.0f,   -0.52f, 0.05f,  1.4f,
-        // Ala izquierda (Superficie Inferior)
         -0.42f,-0.02f, -0.7f,  -0.52f,-0.02f,  1.4f,   -3.2f, -0.02f,  1.0f,
-        // Ala derecha (Superficie Superior)
          0.42f, 0.05f, -0.7f,   0.52f, 0.05f,  1.4f,    3.2f,  0.02f,  1.0f,
-        // Ala derecha (Superficie Inferior)
          0.42f,-0.02f, -0.7f,   3.2f, -0.02f,  1.0f,    0.52f,-0.02f,  1.4f,
 
-        // --- 5. Estabilizadores Verticales Dobles Inclinados (Twin Tails) ---
-        // Cola izquierda
+        // --- 5. Estabilizadores Verticales Dobles ---
         -0.40f, 0.16f,  0.6f,  -0.65f, 1.15f,  1.6f,   -0.40f, 0.16f,  1.5f,
         -0.40f, 0.16f,  0.6f,  -0.40f, 0.16f,  1.5f,   -0.65f, 1.15f,  1.6f,
-        // Cola derecha
          0.40f, 0.16f,  0.6f,   0.40f, 0.16f,  1.5f,    0.65f, 1.15f,  1.6f,
          0.40f, 0.16f,  0.6f,   0.65f, 1.15f,  1.6f,    0.40f, 0.16f,  1.5f
     };
 
     static const float jetUVs[] = {
-        // Morro superior (Camuflaje aeroespacial)
+        // Morro superior
         0.75f, 0.95f,  0.60f, 0.65f,  0.75f, 0.65f,
         0.75f, 0.95f,  0.75f, 0.65f,  0.90f, 0.65f,
-        // Morro inferior (Gris claro de panza)
+        // Morro inferior
         0.25f, 0.45f,  0.10f, 0.15f,  0.25f, 0.15f,
         0.25f, 0.45f,  0.40f, 0.15f,  0.25f, 0.15f,
 
-        // Cúpula / Cabina (Cristal con destello brillante U=[0,0.5], V=[0.5,1.0])
+        // Cabina
         0.25f, 0.60f,  0.08f, 0.75f,  0.25f, 0.92f,
         0.25f, 0.60f,  0.25f, 0.92f,  0.42f, 0.75f,
         0.25f, 0.92f,  0.08f, 0.75f,  0.25f, 0.70f,
         0.25f, 0.92f,  0.25f, 0.70f,  0.42f, 0.75f,
 
-        // Dorso superior fuselaje
+        // Fuselaje
         0.60f, 0.90f,  0.60f, 0.55f,  0.90f, 0.55f,
         0.60f, 0.90f,  0.90f, 0.55f,  0.90f, 0.90f,
-        // Vientre inferior fuselaje
         0.10f, 0.45f,  0.40f, 0.10f,  0.10f, 0.10f,
         0.10f, 0.45f,  0.40f, 0.45f,  0.40f, 0.10f,
 
-        // Alas Superiores (Con insignia de escarapela táctica en V=[0.55, 0.95])
+        // Alas Superiores e Inferiores
         0.60f, 0.60f,  0.95f, 0.95f,  0.95f, 0.60f,
         0.10f, 0.10f,  0.45f, 0.45f,  0.45f, 0.10f,
         0.60f, 0.60f,  0.95f, 0.60f,  0.95f, 0.95f,
         0.10f, 0.10f,  0.45f, 0.10f,  0.45f, 0.45f,
 
-        // Colas dobles
+        // Colas
         0.65f, 0.60f,  0.88f, 0.95f,  0.88f, 0.60f,
         0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
         0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
-        0.65f, 0.60f,  0.88f, 0.95f,  0.88f, 0.60f
+        0.65f, 0.60f,  0.88f, 0.88f,  0.88f, 0.60f
     };
 
     w3dEngine::VertexPointer3f(0, jetVerts);
     w3dEngine::TexCoordPointer2f(0, jetUVs);
     w3dEngine::DrawTrianglesArray(60);
 
-    // --- Llamas de Postcombustión Traseras (Afterburners proyectando hacia +Z, hacia la cámara) ---
+    // Llamas de postcombustión hacia +Z
     float flamePulse = 0.85f + 0.35f * std::sin(timeSec_ * 32.0f);
     float flameVerts[] = {
-        // Tobera / Llama motor izquierdo
         -0.34f, -0.02f, 1.6f,   -0.16f, -0.02f, 1.6f,   -0.25f, -0.02f, 1.6f + (0.95f * flamePulse),
         -0.25f,  0.07f, 1.6f,   -0.25f, -0.11f, 1.6f,   -0.25f, -0.02f, 1.6f + (0.95f * flamePulse),
-        // Tobera / Llama motor derecho
          0.16f, -0.02f, 1.6f,    0.34f, -0.02f, 1.6f,    0.25f, -0.02f, 1.6f + (0.95f * flamePulse),
          0.25f,  0.07f, 1.6f,    0.25f, -0.11f, 1.6f,    0.25f, -0.02f, 1.6f + (0.95f * flamePulse)
     };
@@ -696,7 +836,7 @@ void Renderer::renderAircraft() {
 }
 
 void Renderer::renderProjectiles() {
-    // 1. Trazadoras balísticas reales de la ametralladora / Cañón
+    // 1. Trazadoras del Cañón
     if (!bullets_.empty()) {
         std::vector<float> bulletVerts;
         std::vector<unsigned char> bulletColors;
@@ -704,19 +844,17 @@ void Renderer::renderProjectiles() {
         bulletColors.reserve(bullets_.size() * 8);
 
         for (const auto& b : bullets_) {
-            // Cabeza del proyectil
             bulletVerts.push_back(b.x);
             bulletVerts.push_back(b.y);
             bulletVerts.push_back(b.z);
 
-            // Cola de la trazadora luminosa hacia +Z (detrás del proyectil en vuelo hacia -Z)
             bulletVerts.push_back(b.x);
             bulletVerts.push_back(b.y);
             bulletVerts.push_back(b.z + 3.8f);
 
             bulletColors.insert(bulletColors.end(), {
-                255, 245, 120, 255,   // Cabeza brillante
-                255, 110, 30,  180    // Cola naranja incandescente
+                255, 245, 120, 255,
+                255, 110, 30,  180
             });
         }
 
@@ -731,7 +869,7 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
     }
 
-    // 2. Destello de boca (Muzzle Flash) en las bocas de cañón de las alas
+    // 2. Destello de boca
     if (muzzleFlashTime_ > 0.0f) {
         float mfVerts[] = {
             planeX_ - 0.9f, planeY_ - 0.2f, -7.2f,
@@ -754,7 +892,7 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
     }
 
-    // 3. Misil guiado hacia el objetivo naval
+    // 3. Misil guiado hacia el objetivo
     if (missileFlightTime_ > 0.0f) {
         float progress = CLAMP(1.0f - (missileFlightTime_ / 1.6f), 0.0f, 1.0f);
         float mX = planeX_ * (1.0f - progress) + targetX_ * progress;
@@ -781,6 +919,35 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
         w3dEngine::PopMatrix();
     }
+
+    // 4. Proyectiles antiaéreos (Flak) enemigos
+    if (!enemyBullets_.empty()) {
+        std::vector<float> ebVerts;
+        std::vector<unsigned char> ebColors;
+        for (const auto& b : enemyBullets_) {
+            ebVerts.push_back(b.x);
+            ebVerts.push_back(b.y);
+            ebVerts.push_back(b.z);
+
+            ebVerts.push_back(b.x);
+            ebVerts.push_back(b.y);
+            ebVerts.push_back(b.z - 3.2f);
+
+            ebColors.insert(ebColors.end(), {
+                255, 60,  60, 255,
+                255, 140, 30, 200
+            });
+        }
+        w3dEngine::Disable(w3dEngine::Texture2D);
+        w3dEngine::Enable(w3dEngine::ColorMaterial);
+        w3dEngine::LineWidth(4.2f);
+        w3dEngine::EnableArray(w3dEngine::VertexArray);
+        w3dEngine::EnableArray(w3dEngine::ColorArray);
+        w3dEngine::VertexPointer3f(0, ebVerts.data());
+        w3dEngine::ColorPointer4ub(ebColors.data());
+        w3dEngine::DrawLines(static_cast<int>(enemyBullets_.size() * 2));
+        w3dEngine::DisableArray(w3dEngine::ColorArray);
+    }
 }
 
 void Renderer::renderHUDQuad(float x, float y, float w, float h, GLuint texId, float alpha) {
@@ -795,7 +962,6 @@ void Renderer::renderHUDQuad(float x, float y, float w, float h, GLuint texId, f
         x + w, y + h,
         x,     y + h
     };
-    // UVs ajustados con flip vertical en OpenGL para iconos 2D verticales y directos
     static const float qUVs[] = {
         0.0f, 1.0f,
         1.0f, 1.0f,
@@ -818,7 +984,6 @@ void Renderer::renderHUDQuad(float x, float y, float w, float h, GLuint texId, f
 }
 
 void Renderer::renderHUDBar(float x, float y, float w, float h, float fillPct, float r, float g, float b, float a) {
-    // Fondo de la barra
     float bgVerts[] = {
         x,     y,         x + w, y,         x + w, y + h,
         x,     y,         x + w, y + h,     x,     y + h
@@ -829,7 +994,6 @@ void Renderer::renderHUDBar(float x, float y, float w, float h, float fillPct, f
     w3dEngine::VertexPointer2f(0, bgVerts);
     w3dEngine::DrawTrianglesArray(6);
 
-    // Relleno de la barra
     float fillW = w * CLAMP(fillPct, 0.0f, 1.0f);
     float fgVerts[] = {
         x,         y,         x + fillW, y,         x + fillW, y + h,
@@ -862,8 +1026,60 @@ void Renderer::renderHUDLine(float x0, float y0, float x1, float y1, float r, fl
     w3dEngine::DrawLines(2);
 }
 
-void Renderer::renderGameUI() {
-    // Modo Ortográfico 2D sobre la pantalla
+void Renderer::renderDigits(float x, float y, float charW, float charH, const std::string& text) {
+    if (!texHudDigits_) return;
+    static const std::string charset = "0123456789:/-XKTSP";
+    float totalChars = static_cast<float>(charset.size());
+
+    w3dEngine::Enable(w3dEngine::Texture2D);
+    w3dEngine::BindTexture(texHudDigits_->getTextureID());
+    w3dEngine::Color4f(1.0f, 1.0f, 1.0f, 1.0f);
+    w3dEngine::EnableArray(w3dEngine::VertexArray);
+    w3dEngine::EnableArray(w3dEngine::TexCoordArray);
+
+    float curX = x;
+    for (char c : text) {
+        if (c == ' ') {
+            curX += charW * 0.6f;
+            continue;
+        }
+        auto pos = charset.find(c);
+        if (pos == std::string::npos) {
+            curX += charW;
+            continue;
+        }
+        float u0 = static_cast<float>(pos) / totalChars;
+        float u1 = static_cast<float>(pos + 1) / totalChars;
+
+        float qVerts[] = {
+            curX,         y,
+            curX + charW, y,
+            curX + charW, y + charH,
+
+            curX,         y,
+            curX + charW, y + charH,
+            curX,         y + charH
+        };
+        float qUVs[] = {
+            u0, 1.0f,
+            u1, 1.0f,
+            u1, 0.0f,
+
+            u0, 1.0f,
+            u1, 0.0f,
+            u0, 0.0f
+        };
+
+        w3dEngine::VertexPointer2f(0, qVerts);
+        w3dEngine::TexCoordPointer2f(0, qUVs);
+        w3dEngine::DrawTrianglesArray(6);
+
+        curX += charW * 0.85f;
+    }
+    w3dEngine::DisableArray(w3dEngine::TexCoordArray);
+}
+
+void Renderer::renderMainMenuUI() {
     w3dEngine::Disable(w3dEngine::DepthTest);
     w3dEngine::Enable(w3dEngine::Blend);
 
@@ -874,7 +1090,179 @@ void Renderer::renderGameUI() {
     w3dEngine::MatrixMode(w3dEngine::ModelView);
     w3dEngine::LoadIdentity();
 
-    // 1. Retícula y Mirilla Táctica Central
+    // Sombra cinemática oscura
+    renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.02f, 0.06f, 0.12f, 0.40f);
+
+    // Banner del Título
+    if (texMenuTitle_) {
+        float titleW = 440.0f;
+        float titleH = 138.0f;
+        float tx = (width_ - titleW) * 0.5f;
+        float ty = 35.0f;
+        renderHUDQuad(tx, ty, titleW, titleH, texMenuTitle_->getTextureID(), 1.0f);
+    }
+
+    // Botón JUGAR / DESPEGAR
+    if (texBtnPlay_) {
+        float pulse = 0.90f + 0.10f * std::sin(timeSec_ * 5.0f);
+        float btnW = 340.0f * (0.98f + 0.02f * pulse);
+        float btnH = 78.0f * (0.98f + 0.02f * pulse);
+        float bx = (width_ - btnW) * 0.5f;
+        float by = height_ * 0.52f - 20.0f;
+        renderHUDQuad(bx, by, btnW, btnH, texBtnPlay_->getTextureID(), 1.0f);
+    }
+
+    // Botón AYUDA (?)
+    if (texBtnHelp_) {
+        float hSize = 58.0f;
+        float hx = (width_ + 340.0f) * 0.5f + 15.0f;
+        float hy = height_ * 0.52f - 10.0f;
+        renderHUDQuad(hx, hy, hSize, hSize, texBtnHelp_->getTextureID(), 0.95f);
+    }
+
+    // Botón Sonido
+    if (texBtnSound_) {
+        float sndX = width_ - 70.0f;
+        float sndY = 20.0f;
+        float sndSize = 52.0f;
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.95f : 0.45f);
+    }
+
+    // Puntuación récord
+    if (highScore_ > 0) {
+        float recordW = 280.0f;
+        float rx = (width_ - recordW) * 0.5f;
+        float ry = height_ - 55.0f;
+        renderHUDRect(rx, ry, recordW, 36.0f, 0.05f, 0.15f, 0.25f, 0.75f);
+        renderHUDLine(rx, ry, rx + recordW, ry, 0.0f, 0.85f, 0.95f, 0.9f, 2.0f);
+        std::string recStr = "RECORD X " + std::to_string(highScore_);
+        renderDigits(rx + 25.0f, ry + 6.0f, 18.0f, 24.0f, recStr);
+    }
+
+    // Diálogo Modal de Ayuda
+    if (showHelpModal_ && texDialogHelp_) {
+        renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.0f, 0.0f, 0.0f, 0.75f);
+        float dlgW = 580.0f;
+        float dlgH = 400.0f;
+        float dx = (width_ - dlgW) * 0.5f;
+        float dy = (height_ - dlgH) * 0.5f;
+        renderHUDQuad(dx, dy, dlgW, dlgH, texDialogHelp_->getTextureID(), 1.0f);
+    }
+}
+
+void Renderer::renderPauseUI() {
+    w3dEngine::Disable(w3dEngine::DepthTest);
+    w3dEngine::Enable(w3dEngine::Blend);
+
+    w3dEngine::MatrixMode(w3dEngine::Projection);
+    w3dEngine::LoadIdentity();
+    w3dEngine::Ortho(0.0f, (float)width_, (float)height_, 0.0f, -1.0f, 1.0f);
+
+    w3dEngine::MatrixMode(w3dEngine::ModelView);
+    w3dEngine::LoadIdentity();
+
+    // Fondo oscuro translúcido
+    renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.02f, 0.05f, 0.10f, 0.70f);
+
+    float dlgW = 380.0f;
+    float dlgH = 320.0f;
+    float dx = (width_ - dlgW) * 0.5f;
+    float dy = (height_ - dlgH) * 0.5f;
+
+    if (texDialogPause_) {
+        renderHUDQuad(dx, dy, dlgW, dlgH, texDialogPause_->getTextureID(), 1.0f);
+    }
+
+    float btnW = 270.0f, btnH = 55.0f;
+    float bx = (width_ - btnW) * 0.5f;
+
+    // Continuar
+    if (texBtnResume_) {
+        float by1 = dy + 105.0f;
+        renderHUDQuad(bx, by1, btnW, btnH, texBtnResume_->getTextureID(), 0.95f);
+    }
+
+    // Reiniciar
+    if (texBtnRestart_) {
+        float by2 = dy + 172.0f;
+        renderHUDQuad(bx, by2, btnW, btnH, texBtnRestart_->getTextureID(), 0.95f);
+    }
+
+    // Menú Principal
+    if (texBtnQuit_) {
+        float by3 = dy + 238.0f;
+        renderHUDQuad(bx, by3, btnW, btnH, texBtnQuit_->getTextureID(), 0.95f);
+    }
+
+    // Botón de sonido
+    if (texBtnSound_) {
+        float sndX = width_ - 70.0f;
+        float sndY = 20.0f;
+        float sndSize = 52.0f;
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.95f : 0.45f);
+    }
+}
+
+void Renderer::renderGameOverUI() {
+    w3dEngine::Disable(w3dEngine::DepthTest);
+    w3dEngine::Enable(w3dEngine::Blend);
+
+    w3dEngine::MatrixMode(w3dEngine::Projection);
+    w3dEngine::LoadIdentity();
+    w3dEngine::Ortho(0.0f, (float)width_, (float)height_, 0.0f, -1.0f, 1.0f);
+
+    w3dEngine::MatrixMode(w3dEngine::ModelView);
+    w3dEngine::LoadIdentity();
+
+    // Fondo de alerta táctica rojizo
+    renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.14f, 0.02f, 0.03f, 0.75f);
+
+    float dlgW = 440.0f;
+    float dlgH = 340.0f;
+    float dx = (width_ - dlgW) * 0.5f;
+    float dy = (height_ - dlgH) * 0.5f;
+
+    if (texDialogGameOver_) {
+        renderHUDQuad(dx, dy, dlgW, dlgH, texDialogGameOver_->getTextureID(), 1.0f);
+    }
+
+    // Estadísticas
+    float statY = dy + 105.0f;
+    std::string killStr = "X " + std::to_string(enemiesDestroyed_);
+    renderDigits(dx + 70.0f, statY, 18.0f, 26.0f, killStr);
+
+    int totalScore = enemiesDestroyed_ * 1500;
+    std::string scoreStr = "P " + std::to_string(totalScore);
+    renderDigits(dx + 230.0f, statY, 18.0f, 26.0f, scoreStr);
+
+    float btnW = 270.0f, btnH = 55.0f;
+    float bx = (width_ - btnW) * 0.5f;
+
+    // Reintentar
+    if (texBtnRestart_) {
+        float by1 = dy + 185.0f;
+        renderHUDQuad(bx, by1, btnW, btnH, texBtnRestart_->getTextureID(), 0.95f);
+    }
+
+    // Menú Principal
+    if (texBtnQuit_) {
+        float by2 = dy + 252.0f;
+        renderHUDQuad(bx, by2, btnW, btnH, texBtnQuit_->getTextureID(), 0.95f);
+    }
+}
+
+void Renderer::renderGameUI() {
+    w3dEngine::Disable(w3dEngine::DepthTest);
+    w3dEngine::Enable(w3dEngine::Blend);
+
+    w3dEngine::MatrixMode(w3dEngine::Projection);
+    w3dEngine::LoadIdentity();
+    w3dEngine::Ortho(0.0f, (float)width_, (float)height_, 0.0f, -1.0f, 1.0f);
+
+    w3dEngine::MatrixMode(w3dEngine::ModelView);
+    w3dEngine::LoadIdentity();
+
+    // 1. Retícula Táctica Central
     if (texHudCrosshair_) {
         float reticleSize = 140.0f;
         float rx = (width_ - reticleSize) * 0.5f;
@@ -882,7 +1270,6 @@ void Renderer::renderGameUI() {
         renderHUDQuad(rx, ry, reticleSize, reticleSize, texHudCrosshair_->getTextureID(), targetLocked_ ? 1.0f : 0.85f);
 
         if (targetLocked_) {
-            // Corchetes tácticos de enganche (Lock brackets) en rojo vivo
             float bSize = 18.0f;
             float pad = 10.0f;
             float bx0 = rx - pad;
@@ -891,22 +1278,18 @@ void Renderer::renderGameUI() {
             float by1 = ry + reticleSize + pad;
             float r = 1.0f, g = 0.25f, b = 0.15f, a = 0.95f;
 
-            // Superior Izq
             renderHUDLine(bx0, by0, bx0 + bSize, by0, r, g, b, a, 2.5f);
             renderHUDLine(bx0, by0, bx0, by0 + bSize, r, g, b, a, 2.5f);
-            // Superior Der
             renderHUDLine(bx1, by0, bx1 - bSize, by0, r, g, b, a, 2.5f);
             renderHUDLine(bx1, by0, bx1, by0 + bSize, r, g, b, a, 2.5f);
-            // Inferior Izq
             renderHUDLine(bx0, by1, bx0 + bSize, by1, r, g, b, a, 2.5f);
             renderHUDLine(bx0, by1, bx0, by1 - bSize, r, g, b, a, 2.5f);
-            // Inferior Der
             renderHUDLine(bx1, by1, bx1 - bSize, by1, r, g, b, a, 2.5f);
             renderHUDLine(bx1, by1, bx1, by1 - bSize, r, g, b, a, 2.5f);
         }
     }
 
-    // 2. Radar Táctico / Minimapa Dinámico con Blips y Barrido (Esquina superior izquierda)
+    // 2. Radar Táctico
     if (texHudRadar_) {
         float radarSize = 120.0f;
         float rx = 25.0f;
@@ -917,16 +1300,15 @@ void Renderer::renderGameUI() {
         float rcY = ry + radarSize * 0.5f;
         float radarRadius = radarSize * 0.44f;
 
-        // Línea de barrido táctico rotatorio
         float sweepAngle = timeSec_ * 3.5f;
         float swX = rcX + std::cos(sweepAngle) * radarRadius;
         float swY = rcY + std::sin(sweepAngle) * radarRadius;
         renderHUDLine(rcX, rcY, swX, swY, 0.1f, 1.0f, 0.5f, 0.55f, 1.8f);
 
-        // Blip del jugador (centro del radar, rombo verde esmeralda)
+        // Blip del jugador
         renderHUDRect(rcX - 3.5f, rcY - 3.5f, 7.0f, 7.0f, 0.0f, 1.0f, 0.45f, 1.0f);
 
-        // Blip del buque enemigo relativo a la posición (-Z hacia adelante)
+        // Blip del buque
         float relX = (targetX_ - planeX_) / 60.0f;
         float relZ = (targetZ_ - (-6.5f)) / 140.0f;
         float dist = std::sqrt(relX * relX + relZ * relZ);
@@ -942,7 +1324,6 @@ void Renderer::renderGameUI() {
         renderHUDRect(blipX - blipSize * 0.5f, blipY - blipSize * 0.5f, blipSize, blipSize, 1.0f, 0.2f, 0.15f, blipPulse);
 
         if (targetLocked_) {
-            // Marco de alerta táctica sobre el blip enemigo
             renderHUDLine(blipX - 6.0f, blipY - 6.0f, blipX + 6.0f, blipY - 6.0f, 1.0f, 0.9f, 0.1f, 0.9f, 1.5f);
             renderHUDLine(blipX + 6.0f, blipY - 6.0f, blipX + 6.0f, blipY + 6.0f, 1.0f, 0.9f, 0.1f, 0.9f, 1.5f);
             renderHUDLine(blipX + 6.0f, blipY + 6.0f, blipX - 6.0f, blipY + 6.0f, 1.0f, 0.9f, 0.1f, 0.9f, 1.5f);
@@ -950,33 +1331,28 @@ void Renderer::renderGameUI() {
         }
     }
 
-    // 3. Stick Virtual de Vuelo Flotante Reactivo
+    // 3. Stick Virtual Flotante
     if (texBtnStick_) {
         float baseCenterX = stickActive_ ? stickOriginX_ : 120.0f;
         float baseCenterY = stickActive_ ? stickOriginY_ : ((height_ > 0) ? (height_ - 130.0f) : 400.0f);
 
-        // Base del stick
         renderHUDQuad(baseCenterX - 55.0f, baseCenterY - 55.0f, 110.0f, 110.0f,
                       texBtnStick_->getTextureID(), stickActive_ ? 0.92f : 0.50f);
 
-        // Pomo indicador de pulgar
         float knobX = baseCenterX - 28.0f + (stickDeflectX_ * 32.0f);
         float knobY = baseCenterY - 28.0f + (stickDeflectY_ * 32.0f);
         renderHUDQuad(knobX, knobY, 56.0f, 56.0f,
                       texBtnStick_->getTextureID(), stickActive_ ? 1.0f : 0.70f);
     }
 
-    // 4. Botones Tácticos de Armamento (Esquina inferior derecha)
-    // Botón de Cañón / Fuego continuo
+    // 4. Botones Tácticos de Armamento
     if (texBtnFire_) {
         float fireW = 115.0f;
         float fx = width_ - 145.0f;
         float fy = height_ - 145.0f;
-        float alpha = firePressed_ ? 1.0f : 0.85f;
-        renderHUDQuad(fx, fy, fireW, fireW, texBtnFire_->getTextureID(), alpha);
+        renderHUDQuad(fx, fy, fireW, fireW, texBtnFire_->getTextureID(), firePressed_ ? 1.0f : 0.85f);
     }
 
-    // Botón de Misiles con 4 pips de munición
     if (texBtnMissile_) {
         float mslW = 105.0f;
         float mx = width_ - 140.0f;
@@ -984,7 +1360,6 @@ void Renderer::renderGameUI() {
         float alpha = (missileFlightTime_ > 0.0f || missilePressed_) ? 1.0f : 0.85f;
         renderHUDQuad(mx, my, mslW, mslW, texBtnMissile_->getTextureID(), alpha);
 
-        // Indicadores de munición (4 Pips)
         float pipGap = 5.0f;
         float pipW = (mslW - (pipGap * 3.0f)) / 4.0f;
         float pipH = 7.0f;
@@ -1000,20 +1375,18 @@ void Renderer::renderGameUI() {
         }
     }
 
-    // 5. Barras Digitales de Telemetría HUD
-    // Velocidad (Speed SPD: 480 KTS)
+    // 5. Barras de Telemetría HUD
     float speedPct = CLAMP((speedKnots_ - 380.0f) / 200.0f, 0.0f, 1.0f);
     renderHUDBar(155.0f, 65.0f, 110.0f, 12.0f, speedPct, 0.0f, 0.9f, 0.8f, 0.9f);
 
-    // Altitud (Altitude ALT: 2,400 FT)
     float altPct = CLAMP((altitudeFeet_ - 1500.0f) / 1800.0f, 0.0f, 1.0f);
     renderHUDBar(155.0f, 85.0f, 110.0f, 12.0f, altPct, 0.0f, 0.85f, 1.0f, 0.9f);
 
-    // Integridad del Casco (HULL 100%) - Centro Inferior
+    // Barra de Integridad del Avión
     float hullBarW = 200.0f;
     renderHUDBar((width_ - hullBarW) * 0.5f, height_ - 30.0f, hullBarW, 10.0f, healthPct_, 0.2f, 0.95f, 0.3f, 0.85f);
 
-    // Banner Superior Táctico: Barra de Vida del Buque Objetivo
+    // Vida del Buque Enemigo
     float bannerW = 240.0f;
     float bannerX = (width_ - bannerW) * 0.5f;
     float bannerY = 35.0f;
@@ -1025,174 +1398,247 @@ void Renderer::renderGameUI() {
         renderHUDBar(bannerX, bannerY, bannerW, 14.0f, scanPct, 0.95f, 0.75f, 0.15f, 0.75f);
     }
 
-    // 6. Botón Táctico de Audio / Sonido (Esquina superior derecha)
+    // 6. Botones de Pausa y Sonido (Esquina Superior Derecha)
+    if (texBtnPause_) {
+        float pauseX = width_ - 130.0f;
+        float pauseY = 20.0f;
+        float pauseSize = 52.0f;
+        renderHUDQuad(pauseX, pauseY, pauseSize, pauseSize, texBtnPause_->getTextureID(), 0.90f);
+    }
+
     if (texBtnSound_) {
         float sndX = width_ - 70.0f;
         float sndY = 20.0f;
         float sndSize = 52.0f;
-        float alpha = soundEnabled_ ? 0.95f : 0.40f;
-        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), alpha);
-        // Barra indicadora de estado
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.95f : 0.40f);
         if (soundEnabled_) {
             renderHUDBar(sndX + 4.0f, sndY + sndSize + 2.0f, sndSize - 8.0f, 4.0f, 1.0f, 0.1f, 0.95f, 0.4f, 0.9f);
         } else {
             renderHUDBar(sndX + 4.0f, sndY + sndSize + 2.0f, sndSize - 8.0f, 4.0f, 1.0f, 0.95f, 0.2f, 0.2f, 0.9f);
         }
     }
+
+    // 7. Contadores Digitales en HUD
+    std::string killStr = "X " + std::to_string(enemiesDestroyed_);
+    renderDigits(155.0f, 38.0f, 14.0f, 20.0f, killStr);
+
+    int totalScore = enemiesDestroyed_ * 1500;
+    std::string scoreStr = "P " + std::to_string(totalScore);
+    renderDigits(width_ - 260.0f, 26.0f, 14.0f, 20.0f, scoreStr);
 }
 
 void Renderer::renderWhisk3D() {
     float dt = 0.01667f;
-    timeSec_ += dt;
 
-    // Dinámica de vuelo y suavizado aerodinámico
-    if (stickActive_) {
-        targetRoll_  = stickDeflectX_ * 42.0f;
-        targetPitch_ = -stickDeflectY_ * 26.0f;
-        targetYaw_   = stickDeflectX_ * 16.0f;
+    // -------------------------------------------------------------
+    // ACTUALIZACIÓN DE ESTADO DEL JUEGO
+    // -------------------------------------------------------------
+    if (gameState_ == STATE_MAIN_MENU) {
+        timeSec_ += dt * 0.7f;
+        // Piloto automático cinemático suave sobre el océano
+        targetRoll_  = std::sin(timeSec_ * 0.8f) * 14.0f;
+        targetPitch_ = std::cos(timeSec_ * 0.6f) * 6.0f;
+        targetYaw_   = targetRoll_ * 0.3f;
+        planeX_ = std::sin(timeSec_ * 0.4f) * 2.2f;
+        planeY_ = 0.4f + std::cos(timeSec_ * 0.5f) * 0.6f;
 
-        planeX_ += stickDeflectX_ * 0.14f;
-        planeY_ += (-stickDeflectY_) * 0.11f;
-    } else {
-        // Estabilizador aerodinámico suave cuando se suelta el stick
-        targetRoll_  = std::sin(timeSec_ * 1.5f) * 1.2f;
-        targetPitch_ = std::cos(timeSec_ * 1.0f) * 0.6f;
-        targetYaw_   = 0.0f;
+        planeRoll_  += (targetRoll_ - planeRoll_) * 0.10f;
+        planePitch_ += (targetPitch_ - planePitch_) * 0.10f;
+        planeYaw_   += (targetYaw_ - planeYaw_) * 0.10f;
     }
+    else if (gameState_ == STATE_PLAYING) {
+        timeSec_ += dt;
 
-    // Interpolación suave para evitar saltos bruscos
-    planeRoll_  += (targetRoll_ - planeRoll_) * 0.18f;
-    planePitch_ += (targetPitch_ - planePitch_) * 0.18f;
-    planeYaw_   += (targetYaw_ - planeYaw_) * 0.18f;
+        if (stickActive_) {
+            targetRoll_  = stickDeflectX_ * 42.0f;
+            targetPitch_ = -stickDeflectY_ * 26.0f;
+            targetYaw_   = stickDeflectX_ * 16.0f;
 
-    // Límites de envolvente de vuelo
-    planeX_ = CLAMP(planeX_, -5.5f, 5.5f);
-    planeY_ = CLAMP(planeY_, -1.8f, 3.2f);
-
-    // Actualizar lecturas de telemetría digital
-    altitudeFeet_ = 2400.0f + (planeY_ * 300.0f);
-    speedKnots_   = 480.0f - (planePitch_ * 2.2f);
-
-    // Recarga de munición de misiles cada 8 segundos (hasta 4)
-    if (missileCount_ < 4 && std::fmod(timeSec_, 8.0f) < 0.02f) {
-        missileCount_++;
-    }
-
-    // Desplazamiento del buque de combate enemigo
-    targetZ_ += 0.26f;
-    if (targetZ_ > 8.0f) {
-        // Buque rebasado, respawn hacia adelante en -Z
-        targetZ_ = -140.0f;
-        targetX_ = std::sin(timeSec_ * 0.6f) * 20.0f;
-        targetHealth_ = targetMaxHealth_;
-    }
-
-    // Comprobación de enganche táctico (Target Lock) hacia adelante (-Z)
-    float relTargetX = targetX_ - planeX_;
-    float relTargetY = (targetY_ + 1.2f) - (planeY_ - 0.5f);
-    float relTargetZ = targetZ_ - (-6.5f);
-
-    bool nowLocked = (relTargetZ < -10.0f && relTargetZ > -110.0f &&
-                      std::fabs(relTargetX) < 7.5f && std::fabs(relTargetY) < 5.5f);
-    if (nowLocked && !prevTargetLocked_ && sndLock_) {
-        w3dEngine::W3dSoundPlay(sndLock_, 0.65f, false);
-    }
-    prevTargetLocked_ = nowLocked;
-    targetLocked_ = nowLocked;
-
-    // Disparo continuo de cañón cuando se presiona o sostiene el botón
-    if (firePressed_) {
-        cannonCooldown_ -= dt;
-        if (cannonCooldown_ <= 0.0f) {
-            cannonCooldown_ = 0.085f;
-            muzzleFlashTime_ = 0.08f;
-            if (sndCannon_) {
-                w3dEngine::W3dSoundPlayPitch(sndCannon_, 0.55f, false, 0.94f + (rand() % 12) * 0.01f);
-            }
-            // Disparar dos proyectiles gemelos desde las alas hacia adelante (-Z)
-            Bullet b1;
-            b1.x = planeX_ - 0.9f;
-            b1.y = planeY_ - 0.3f;
-            b1.z = -7.2f;
-            b1.vx = (planeRoll_ * 0.06f);
-            b1.vy = (planePitch_ * 0.06f);
-            b1.vz = -180.0f;
-            b1.life = 0.85f;
-            bullets_.push_back(b1);
-
-            Bullet b2 = b1;
-            b2.x = planeX_ + 0.9f;
-            bullets_.push_back(b2);
+            planeX_ += stickDeflectX_ * 0.14f;
+            planeY_ += (-stickDeflectY_) * 0.11f;
+        } else {
+            targetRoll_  = std::sin(timeSec_ * 1.5f) * 1.2f;
+            targetPitch_ = std::cos(timeSec_ * 1.0f) * 0.6f;
+            targetYaw_   = 0.0f;
         }
-    } else {
-        cannonCooldown_ = 0.0f;
-    }
 
-    // Actualizar destello de boca y flash de impacto
-    if (muzzleFlashTime_ > 0.0f) muzzleFlashTime_ -= dt;
-    if (targetHitFlashTime_ > 0.0f) targetHitFlashTime_ -= dt;
+        planeRoll_  += (targetRoll_ - planeRoll_) * 0.18f;
+        planePitch_ += (targetPitch_ - planePitch_) * 0.18f;
+        planeYaw_   += (targetYaw_ - planeYaw_) * 0.18f;
 
-    // Actualización de proyectiles de cañón y detección de impactos en el buque
-    for (auto it = bullets_.begin(); it != bullets_.end(); ) {
-        it->x += it->vx * dt;
-        it->y += it->vy * dt;
-        it->z += it->vz * dt;
-        it->life -= dt;
+        planeX_ = CLAMP(planeX_, -5.5f, 5.5f);
+        planeY_ = CLAMP(planeY_, -1.8f, 3.2f);
 
-        bool hit = (it->z <= targetZ_ + 9.0f && it->z >= targetZ_ - 11.0f &&
-                    it->x >= targetX_ - 3.5f && it->x <= targetX_ + 3.5f &&
-                    it->y >= targetY_ - 1.2f && it->y <= targetY_ + 4.5f);
+        altitudeFeet_ = 2400.0f + (planeY_ * 300.0f);
+        speedKnots_   = 480.0f - (planePitch_ * 2.2f);
 
-        if (hit) {
-            targetHealth_ -= 4.0f;
-            targetHitFlashTime_ = 0.12f;
-            it = bullets_.erase(it);
-            if (targetHealth_ <= 0.0f) {
+        if (missileCount_ < 4 && std::fmod(timeSec_, 8.0f) < 0.02f) {
+            missileCount_++;
+        }
+
+        // Avance del buque enemigo
+        targetZ_ += 0.26f;
+        if (targetZ_ > 8.0f) {
+            targetZ_ = -140.0f;
+            targetX_ = std::sin(timeSec_ * 0.6f) * 20.0f;
+            targetHealth_ = targetMaxHealth_;
+        }
+
+        // Enganche táctico
+        float relTargetX = targetX_ - planeX_;
+        float relTargetY = (targetY_ + 1.2f) - (planeY_ - 0.5f);
+        float relTargetZ = targetZ_ - (-6.5f);
+
+        bool nowLocked = (relTargetZ < -10.0f && relTargetZ > -110.0f &&
+                          std::fabs(relTargetX) < 7.5f && std::fabs(relTargetY) < 5.5f);
+        if (nowLocked && !prevTargetLocked_ && sndLock_) {
+            w3dEngine::W3dSoundPlay(sndLock_, 0.65f, false);
+        }
+        prevTargetLocked_ = nowLocked;
+        targetLocked_ = nowLocked;
+
+        // Disparo continuo de cañón
+        if (firePressed_) {
+            cannonCooldown_ -= dt;
+            if (cannonCooldown_ <= 0.0f) {
+                cannonCooldown_ = 0.085f;
+                muzzleFlashTime_ = 0.08f;
+                if (sndCannon_) {
+                    w3dEngine::W3dSoundPlayPitch(sndCannon_, 0.55f, false, 0.94f + (rand() % 12) * 0.01f);
+                }
+                Bullet b1;
+                b1.x = planeX_ - 0.9f;
+                b1.y = planeY_ - 0.3f;
+                b1.z = -7.2f;
+                b1.vx = (planeRoll_ * 0.06f);
+                b1.vy = (planePitch_ * 0.06f);
+                b1.vz = -180.0f;
+                b1.life = 0.85f;
+                bullets_.push_back(b1);
+
+                Bullet b2 = b1;
+                b2.x = planeX_ + 0.9f;
+                bullets_.push_back(b2);
+            }
+        } else {
+            cannonCooldown_ = 0.0f;
+        }
+
+        if (muzzleFlashTime_ > 0.0f) muzzleFlashTime_ -= dt;
+        if (targetHitFlashTime_ > 0.0f) targetHitFlashTime_ -= dt;
+
+        // Balas del jugador
+        for (auto it = bullets_.begin(); it != bullets_.end(); ) {
+            it->x += it->vx * dt;
+            it->y += it->vy * dt;
+            it->z += it->vz * dt;
+            it->life -= dt;
+
+            bool hit = (it->z <= targetZ_ + 9.0f && it->z >= targetZ_ - 11.0f &&
+                        it->x >= targetX_ - 3.5f && it->x <= targetX_ + 3.5f &&
+                        it->y >= targetY_ - 1.2f && it->y <= targetY_ + 4.5f);
+
+            if (hit) {
+                targetHealth_ -= 4.0f;
+                targetHitFlashTime_ = 0.12f;
+                it = bullets_.erase(it);
+                if (targetHealth_ <= 0.0f) {
+                    enemiesDestroyed_++;
+                    targetHealth_ = targetMaxHealth_;
+                    targetZ_ = -140.0f;
+                    targetX_ = (rand() % 36 - 18) * 1.0f;
+                    if (sndExplosion_) {
+                        w3dEngine::W3dSoundPlay(sndExplosion_, 0.95f, false);
+                    }
+                }
+            } else if (it->life <= 0.0f || it->z < -260.0f) {
+                it = bullets_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Misil guiado
+        if (missileFlightTime_ > 0.0f) {
+            missileFlightTime_ -= dt;
+            if (missileFlightTime_ <= 0.0f) {
+                missileFlightTime_ = 0.0f;
                 enemiesDestroyed_++;
                 targetHealth_ = targetMaxHealth_;
                 targetZ_ = -140.0f;
                 targetX_ = (rand() % 36 - 18) * 1.0f;
+                targetHitFlashTime_ = 0.45f;
+                muzzleFlashTime_ = 0.3f;
                 if (sndExplosion_) {
                     w3dEngine::W3dSoundPlay(sndExplosion_, 0.95f, false);
                 }
             }
-        } else if (it->life <= 0.0f || it->z < -260.0f) {
-            it = bullets_.erase(it);
-        } else {
-            ++it;
         }
-    }
 
-    // Seguimiento y destrucción por misil guiado
-    if (missileFlightTime_ > 0.0f) {
-        missileFlightTime_ -= dt;
-        if (missileFlightTime_ <= 0.0f) {
-            missileFlightTime_ = 0.0f;
-            enemiesDestroyed_++;
-            targetHealth_ = targetMaxHealth_;
-            targetZ_ = -140.0f;
-            targetX_ = (rand() % 36 - 18) * 1.0f;
-            targetHitFlashTime_ = 0.45f;
-            muzzleFlashTime_ = 0.3f;
-            if (sndExplosion_) {
-                w3dEngine::W3dSoundPlay(sndExplosion_, 0.95f, false);
+        // Fuego antiaéreo de respuesta del buque enemigo (Flak)
+        flakCooldown_ -= dt;
+        if (flakCooldown_ <= 0.0f) {
+            flakCooldown_ = 2.2f + (rand() % 10) * 0.1f;
+            if (targetZ_ < -25.0f && targetZ_ > -130.0f) {
+                EnemyBullet eb;
+                eb.x = targetX_ + (rand() % 4 - 2) * 0.6f;
+                eb.y = targetY_ + 2.8f;
+                eb.z = targetZ_ + 4.0f;
+                eb.vx = (planeX_ - eb.x) * 0.32f;
+                eb.vy = (planeY_ - eb.y) * 0.32f;
+                eb.vz = 55.0f; // Vuela hacia el jugador
+                eb.life = 3.2f;
+                enemyBullets_.push_back(eb);
             }
         }
+
+        // Actualizar proyectiles antiaéreos enemigos
+        for (auto it = enemyBullets_.begin(); it != enemyBullets_.end(); ) {
+            it->x += it->vx * dt;
+            it->y += it->vy * dt;
+            it->z += it->vz * dt;
+            it->life -= dt;
+
+            float dx = it->x - planeX_;
+            float dy = it->y - (planeY_ - 0.5f);
+            float dz = it->z - (-6.5f);
+            float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+
+            if (dist < 1.6f) {
+                healthPct_ -= 0.12f;
+                it = enemyBullets_.erase(it);
+                if (healthPct_ <= 0.0f) {
+                    healthPct_ = 0.0f;
+                    gameState_ = STATE_GAME_OVER;
+                    if (enemiesDestroyed_ > highScore_) {
+                        highScore_ = enemiesDestroyed_;
+                    }
+                    if (sndExplosion_) {
+                        w3dEngine::W3dSoundPlay(sndExplosion_, 1.0f, false);
+                    }
+                    break;
+                }
+            } else if (it->life <= 0.0f || it->z > 10.0f) {
+                it = enemyBullets_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        W3dFisicaPaso(1.0f / 60.0f);
     }
+    // En STATE_PAUSED no se avanzan timers ni física
 
-    // Paso físico de Whisk3D
-    W3dFisicaPaso(1.0f / 60.0f);
-
-    // 1. Configurar Viewport
+    // -------------------------------------------------------------
+    // RENDERIZADO DE LA ESCENA 3D
+    // -------------------------------------------------------------
     w3dEngine::Viewport(0, 0, width_, height_);
 
-    // 2. Matriz de Proyección Perspectiva 3D
     float aspect = (height_ > 0) ? static_cast<float>(width_) / static_cast<float>(height_) : 1.0f;
     w3dEngine::MatrixMode(w3dEngine::Projection);
     w3dEngine::LoadIdentity();
     w3dEngine::Perspective(55.0f, aspect, 0.1f, 500.0f);
 
-    // 3. Matriz ModelView de Cámara de persecución en 3ra persona con seguimiento cinemático
     float camLagX = planeX_ * 0.35f;
     float camLagY = planeY_ * 0.22f;
     float camBank = planeRoll_ * 0.12f;
@@ -1202,30 +1648,36 @@ void Renderer::renderWhisk3D() {
     w3dEngine::Rotatef(camBank, 0.0f, 0.0f, 1.0f);
     w3dEngine::Translatef(-camLagX, -0.9f - camLagY, -2.0f);
 
-    // 4. Estados 3D
     w3dEngine::Enable(w3dEngine::DepthTest);
     w3dEngine::DepthFunc(w3dEngine::DepthLEqual);
     w3dEngine::Enable(w3dEngine::CullFace);
 
-    // 5. Dibujar elementos de la escena 3D
     renderSkyAndOcean();
     renderIslands();
     renderTarget();
     renderAircraft();
     renderProjectiles();
 
-    // 6. Dibujar Interfaz de Usuario (HUD UI) 2D
-    renderGameUI();
+    // -------------------------------------------------------------
+    // RENDERIZADO DE LA INTERFAZ DE USUARIO (2D UI)
+    // -------------------------------------------------------------
+    if (gameState_ == STATE_MAIN_MENU) {
+        renderMainMenuUI();
+    } else if (gameState_ == STATE_PLAYING) {
+        renderGameUI();
+    } else if (gameState_ == STATE_PAUSED) {
+        renderPauseUI();
+    } else if (gameState_ == STATE_GAME_OVER) {
+        renderGameOverUI();
+    }
 }
 
 void Renderer::render() {
     updateRenderArea();
 
-    // Limpiar pantalla con color de atmósfera aeroespacial
     w3dEngine::ClearColor(0.06f, 0.12f, 0.22f, 1.0f);
     w3dEngine::Clear(w3dEngine::ColorBuffer | w3dEngine::DepthBuffer);
 
-    // Renderizar escena 3D y UI del juego con Whisk3D
     renderWhisk3D();
 
     auto swapResult = eglSwapBuffers(display_, surface_);
@@ -1285,7 +1737,6 @@ void Renderer::initRenderer() {
     width_ = -1;
     height_ = -1;
 
-    // Inicializar Whisk3D Core
     initWhisk3D();
 }
 
