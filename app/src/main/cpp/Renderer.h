@@ -4,26 +4,17 @@
 #include <EGL/egl.h>
 #include <memory>
 #include <vector>
+#include <string>
 
 #include "Model.h"
 #include "Shader.h"
+#include "TextureAsset.h"
 
 struct android_app;
 
 class Renderer {
 public:
-    inline Renderer(android_app *pApp) :
-            app_(pApp),
-            display_(EGL_NO_DISPLAY),
-            surface_(EGL_NO_SURFACE),
-            context_(EGL_NO_CONTEXT),
-            width_(0),
-            height_(0),
-            shaderNeedsNewProjectionMatrix_(true),
-            angle_(0.0f) {
-        initRenderer();
-    }
-
+    explicit Renderer(android_app *pApp);
     virtual ~Renderer();
 
     void handleInput();
@@ -32,11 +23,21 @@ public:
 private:
     void initRenderer();
     void updateRenderArea();
-    void createModels();
-
-    // Whisk3D Core integration
     void initWhisk3D();
+    void loadGameTextures();
+
+    // 3D Scene Rendering
     void renderWhisk3D();
+    void renderSkyAndOcean();
+    void renderIslands();
+    void renderAircraft();
+    void renderTarget();
+    void renderProjectiles();
+
+    // 2D HUD UI Rendering
+    void renderGameUI();
+    void renderHUDQuad(float x, float y, float w, float h, GLuint texId, float alpha = 1.0f);
+    void renderHUDBar(float x, float y, float w, float h, float fillPct, float r, float g, float b, float a);
 
     android_app *app_;
     EGLDisplay display_;
@@ -46,10 +47,53 @@ private:
     EGLint height_;
 
     bool shaderNeedsNewProjectionMatrix_;
-    float angle_;
+    float timeSec_;
 
-    std::unique_ptr<Shader> shader_;
-    std::vector<Model> models_;
+    // Player Flight Telemetry & Controls
+    float planePitch_;
+    float planeRoll_;
+    float planeYaw_;
+    float planeX_;
+    float planeY_;
+    float planeZ_;
+    float speedKnots_;
+    float altitudeFeet_;
+    float healthPct_;
+    int missileCount_;
+    int enemiesDestroyed_;
+
+    // Target state
+    float targetX_;
+    float targetY_;
+    float targetZ_;
+    bool targetLocked_;
+
+    // Touch Controls State
+    bool touchDown_;
+    float touchX_;
+    float touchY_;
+    bool firePressed_;
+    bool missilePressed_;
+    float muzzleFlashTime_;
+    float missileFlightTime_;
+
+    struct Bullet {
+        float x, y, z;
+        float vx, vy, vz;
+        float life;
+    };
+    std::vector<Bullet> bullets_;
+
+    // Textures
+    std::shared_ptr<TextureAsset> texAirplane_;
+    std::shared_ptr<TextureAsset> texSea_;
+    std::shared_ptr<TextureAsset> texTerrain_;
+    std::shared_ptr<TextureAsset> texTarget_;
+    std::shared_ptr<TextureAsset> texHudCrosshair_;
+    std::shared_ptr<TextureAsset> texHudRadar_;
+    std::shared_ptr<TextureAsset> texBtnFire_;
+    std::shared_ptr<TextureAsset> texBtnMissile_;
+    std::shared_ptr<TextureAsset> texBtnStick_;
 };
 
-#endif //ANDROIDGLINVESTIGATIONS_RENDERER_H
+#endif // ANDROIDGLINVESTIGATIONS_RENDERER_H

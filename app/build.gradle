@@ -9,6 +9,8 @@ android {
     compileSdk {
         version = release(37)
     }
+    buildToolsVersion '37.0.0'
+    ndkVersion '30.0.14904198 rc1'
 
     defaultConfig {
         applicationId "com.diamon.myapplication"
