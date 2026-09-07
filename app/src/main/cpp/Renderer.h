@@ -42,6 +42,8 @@ private:
     void renderGameUI();
     void renderHUDQuad(float x, float y, float w, float h, GLuint texId, float alpha = 1.0f);
     void renderHUDBar(float x, float y, float w, float h, float fillPct, float r, float g, float b, float a);
+    void renderHUDRect(float x, float y, float w, float h, float r, float g, float b, float a);
+    void renderHUDLine(float x0, float y0, float x1, float y1, float r, float g, float b, float a, float width = 2.0f);
 
     android_app *app_;
     EGLDisplay display_;
@@ -70,7 +72,11 @@ private:
     float targetX_;
     float targetY_;
     float targetZ_;
+    float targetHealth_;
+    float targetMaxHealth_;
+    float targetHitFlashTime_;
     bool targetLocked_;
+    bool prevTargetLocked_;
 
     // Touch Controls State
     bool touchDown_;
@@ -82,6 +88,7 @@ private:
     float stickDeflectY_;
     bool firePressed_;
     bool missilePressed_;
+    float cannonCooldown_;
     float muzzleFlashTime_;
     float missileFlightTime_;
 
