@@ -1,9 +1,30 @@
-# 🎮 Whisk3D Android
+# ✈️ Whisk3D: Sky Strike
 
-> **Lema:** *Potencia 3D retro y liviana para Android: simplicidad, portabilidad y rendimiento nativo en C++.*  
-> *(Bringing classic retro 3D game power to Android with lightweight C++ and modern GameActivity).*
+<p align="center">
+  <img src="app/src/main/ic_launcher-playstore.png" width="160" height="160" alt="Whisk3D: Sky Strike Logo" />
+</p>
 
-**Whisk3D Android** es la implementación y plantilla oficial para ejecutar el motor de videojuegos 3D/2D en dispositivos Android modernos utilizando **Google GameActivity** del Android Game Development Kit (AGDK) y C++ nativo.
+[![Android](https://img.shields.io/badge/Android-6.0%20(API%2023)%20a%20Android%2017%20(API%2037)-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
+[![ABI](https://img.shields.io/badge/ABI-arm64--v8a%20%7C%20armeabi--v7a%20%7C%20x86__64-0091EA?logo=arm&logoColor=white)](https://developer.android.com/ndk/guides/abis)
+[![NDK](https://img.shields.io/badge/NDK-r30--rc1-4CAF50?logo=android&logoColor=white)](https://developer.android.com/ndk)
+[![AGP](https://img.shields.io/badge/AGP-9.2.1-blue?logo=android)](https://developer.android.com/studio/releases/gradle-plugin)
+[![Google Play](https://img.shields.io/badge/Google%20Play-Target%20Ready-34A853?logo=googleplay&logoColor=white)](https://play.google.com/store)
+[![Licencia](https://img.shields.io/badge/Licencia-Apache%202.0-blue)](./LICENSE)
+
+> Nombre visible de la app: **Whisk3D: Sky Strike**.  
+> Lema: *Potencia 3D retro y liviana para Android: simplicidad, portabilidad y rendimiento nativo en C++.*  
+> Género: **Retro 3D Aerial Combat / Flight Arcade** (Avión de combate 3D sobre mar y tierra disparando a objetivos).  
+> Rango de soporte Android: **API 23 a API 37** (Android 6.0 a Android 17+).
+
+---
+
+## 🎮 Descripción del Juego
+
+**Whisk3D: Sky Strike** es un juego arcade de combate aéreo en 3D para Android donde pilotas un caza militar sobre archipiélagos, océano abierto y bases terrestres enemigas. Diseñado con una estética retro 3D ultraliviana utilizando **Whisk3D Core** en C++ puro y **Google GameActivity** (AGDK) para máxima fluidez y tasa de refresco nativa.
+
+- 🛩️ **Vuelo 3D y Combate:** Navega escenarios sobre mar y tierra esquivando fuego antiaéreo y destruyendo blancos estratégicos.
+- 🎯 **Armamento:** Proyectiles balísticos, misiles y láseres con efectos de partículas e impacto en tiempo real.
+- ⚡ **Rendimiento Nativo:** Cero sobrecarga de motores pesados, renderizado directo en OpenGL ES 2.0 / 3.0.
 
 ---
 
@@ -19,14 +40,15 @@ Agradecimientos especiales a **Dante Leoncini** por concebir y liderar la arquit
 
 ---
 
-## 🌟 Características Principales
+## 🌟 Características Técnicas
 
 - ⚡ **Alto rendimiento y bajo consumo:** Motor en C++ optimizado para correr con una fracción de los recursos habituales.
 - 🕹️ **GameActivity (AGDK):** Manejo robusto del ciclo de vida de la ventana, loop de renderizado a pantalla completa y eventos táctiles/gamepad nativos.
-- 🎨 **Renderizado Retro:** Abstracción gráfica unificada sobre OpenGL ES 2.0 / 3.0 con soporte de texturas, iluminación, niebla, alpha blending y estética retro/pixelada.
-- 📦 **I/O y Assets APK:** Integración directa con el `AAssetManager` de Android para cargar mallas `.w3dm`, texturas PNG/JPG y paquetes cifrados `.w3dpack` directamente desde los assets del APK.
-- 🛠️ **Configuración moderna de Gradle:** Compatible con Gradle 9.6.0 y Android Gradle Plugin (AGP) 9.2.1, listo para Android Studio y Android Code Studio.
-- 🧪 **Solo Debug:** Configurado sin dependencias de firmas de producción para facilitar el desarrollo, pruebas y clonado directo.
+- 🎨 **Renderizado Retro:** Abstracción gráfica unificada sobre OpenGL ES 2.0 / 3.0 con soporte de texturas, iluminación, niebla, alpha blending y estética retro.
+- 📦 **I/O y Assets APK:** Integración directa con el `AAssetManager` de Android para cargar mallas `.w3dm`, texturas PNG/JPG y paquetes `.w3dpack`.
+- 🛠️ **Configuración moderna de Gradle:** Compatible con Gradle 9.6.0 y Android Gradle Plugin (AGP) 9.2.1.
+- 🧪 **Solo Debug:** Configurado sin dependencias de firmas de producción para facilitar el desarrollo y pruebas directas.
+- 💾 **Caché y Builds en `/tmp`:** Configurado como en *Flash-EEPROM-Tool* para redirigir Gradle cache y build outputs a `/tmp`, protegiendo el almacenamiento local.
 
 ---
 
@@ -34,7 +56,7 @@ Agradecimientos especiales a **Dante Leoncini** por concebir y liderar la arquit
 
 ### 1. Preparar el SDK / NDK
 
-El proyecto incluye el script automatizado `setup-sdk.sh` para descargar y configurar el SDK/NDK en entornos Linux/CloudShell:
+El proyecto incluye el script automatizado `setup-sdk.sh` para descargar y configurar el SDK/NDK en entornos Linux:
 
 ```bash
 bash setup-sdk.sh
@@ -47,7 +69,14 @@ bash setup-sdk.sh
 ```
 
 El APK resultante se genera en:
-`app/build/outputs/apk/debug/app-debug.apk`
+`/tmp/whisk3d/outputs/apk/debug/app-debug.apk`
+
+O para compilar el Android App Bundle (AAB):
+```bash
+./gradlew bundleDebug
+```
+Ruta del AAB:
+`/tmp/whisk3d/outputs/bundle/debug/app-debug.aab`
 
 ---
 
@@ -58,6 +87,7 @@ Whisk3D-Android/
 ├── app/
 │   ├── build.gradle              # Configuración de app (compileSdk 37, minSdk 23, NDK)
 │   └── src/main/
+│       ├── ic_launcher-playstore.png # Icono 512x512 para Google Play Store
 │       ├── cpp/
 │       │   ├── CMakeLists.txt    # Configuración de CMake para compilar Whisk3D Core
 │       │   ├── main.cpp          # Punto de entrada android_main con GameActivity
@@ -65,7 +95,7 @@ Whisk3D-Android/
 │       │   ├── include/GL/gl.h   # Shim portable de OpenGL para Android NDK
 │       │   └── whisk3d/          # Código fuente de Whisk3D Core (por Dante Leoncini)
 │       ├── java/                 # Actividad Android Java vinculada con GameActivity
-│       └── res/                  # Recursos de Android (iconos, temas)
+│       └── res/                  # Recursos de Android (iconos mipmap, temas, strings)
 ├── gradle/
 │   ├── libs.versions.toml        # Versiones de dependencias (AGP 9.2.1, GamesActivity 4.4.2)
 │   └── wrapper/                  # Gradle Wrapper 9.6.0
