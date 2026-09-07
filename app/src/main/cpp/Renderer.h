@@ -24,6 +24,10 @@ public:
     void handleInput();
     void render();
 
+    bool canRender() const { return surface_ != EGL_NO_SURFACE && context_ != EGL_NO_CONTEXT; }
+    void onWindowInit();
+    void onWindowTerm();
+
 private:
     void initRenderer();
     void updateRenderArea();
@@ -49,6 +53,7 @@ private:
     EGLDisplay display_;
     EGLSurface surface_;
     EGLContext context_;
+    EGLConfig config_;
     EGLint width_;
     EGLint height_;
 
@@ -59,6 +64,9 @@ private:
     float planePitch_;
     float planeRoll_;
     float planeYaw_;
+    float targetPitch_;
+    float targetRoll_;
+    float targetYaw_;
     float planeX_;
     float planeY_;
     float planeZ_;
@@ -84,6 +92,8 @@ private:
     float touchY_;
     bool stickActive_;
     int stickPointerId_;
+    float stickOriginX_;
+    float stickOriginY_;
     float stickDeflectX_;
     float stickDeflectY_;
     bool firePressed_;

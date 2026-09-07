@@ -1,12 +1,21 @@
 package com.diamon.myapplication;
 
+import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
 
 import com.google.androidgamesdk.GameActivity;
 
 public class MainActivity extends GameActivity {
     static {
         System.loadLibrary("myapplication");
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // Mantener la pantalla encendida (WakeLock) durante el vuelo
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     @Override

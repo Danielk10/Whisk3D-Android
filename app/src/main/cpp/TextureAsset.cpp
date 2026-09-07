@@ -23,6 +23,7 @@ TextureAsset::loadAsset(AAssetManager *assetManager, const std::string &assetPat
     off_t length = AAsset_getLength(pAsset);
 
     int width = 0, height = 0, channels = 0;
+    stbi_set_flip_vertically_on_load(true);
     stbi_uc *pixels = stbi_load_from_memory(
             static_cast<const stbi_uc*>(buffer),
             static_cast<int>(length),

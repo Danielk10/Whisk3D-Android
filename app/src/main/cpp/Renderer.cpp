@@ -6,6 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
+#include <cassert>
 
 #include "AndroidOut.h"
 #include "Shader.h"
@@ -25,6 +26,7 @@ Renderer::Renderer(android_app *pApp) :
         display_(EGL_NO_DISPLAY),
         surface_(EGL_NO_SURFACE),
         context_(EGL_NO_CONTEXT),
+        config_(nullptr),
         width_(0),
         height_(0),
         shaderNeedsNewProjectionMatrix_(true),
@@ -32,6 +34,9 @@ Renderer::Renderer(android_app *pApp) :
         planePitch_(0.0f),
         planeRoll_(0.0f),
         planeYaw_(0.0f),
+        targetPitch_(0.0f),
+        targetRoll_(0.0f),
+        targetYaw_(0.0f),
         planeX_(0.0f),
         planeY_(0.0f),
         planeZ_(0.0f),
@@ -53,6 +58,8 @@ Renderer::Renderer(android_app *pApp) :
         touchY_(0.0f),
         stickActive_(false),
         stickPointerId_(-1),
+        stickOriginX_(120.0f),
+        stickOriginY_(400.0f),
         stickDeflectX_(0.0f),
         stickDeflectY_(0.0f),
         firePressed_(false),
@@ -94,6 +101,26 @@ Renderer::~Renderer() {
         }
         eglTerminate(display_);
         display_ = EGL_NO_DISPLAY;
+    }
+}
+
+void Renderer::onWindowInit() {
+    if (display_ != EGL_NO_DISPLAY && context_ != EGL_NO_CONTEXT && app_->window != nullptr) {
+        surface_ = eglCreateWindowSurface(display_, config_, app_->window, nullptr);
+        if (surface_ != EGL_NO_SURFACE) {
+            eglMakeCurrent(display_, surface_, surface_, context_);
+            updateRenderArea();
+            aout << "Whisk3D: EGL surface restored on window init." << std::endl;
+        }
+    }
+}
+
+void Renderer::onWindowTerm() {
+    if (display_ != EGL_NO_DISPLAY && surface_ != EGL_NO_SURFACE) {
+        eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(display_, surface_);
+        surface_ = EGL_NO_SURFACE;
+        aout << "Whisk3D: EGL surface released on window term." << std::endl;
     }
 }
 
@@ -153,15 +180,11 @@ void Renderer::handleInput() {
     auto *inputBuffer = android_app_swap_input_buffers(app_);
     if (!inputBuffer) return;
 
-    float stickCenterX = 110.0f;
-    float stickCenterY = (height_ > 0) ? (height_ - 120.0f) : 400.0f;
-    float stickRadius = 85.0f;
+    float fireX0 = width_ - 145.0f, fireY0 = height_ - 145.0f;
+    float fireX1 = width_ - 15.0f,  fireY1 = height_ - 15.0f;
 
-    float fireX0 = width_ - 150.0f, fireY0 = height_ - 150.0f;
-    float fireX1 = width_ - 10.0f,  fireY1 = height_ - 10.0f;
-
-    float mslX0 = width_ - 150.0f, mslY0 = height_ - 280.0f;
-    float mslX1 = width_ - 10.0f,  mslY1 = height_ - 150.0f;
+    float mslX0 = width_ - 145.0f, mslY0 = height_ - 265.0f;
+    float mslX1 = width_ - 15.0f,  mslY1 = height_ - 150.0f;
 
     float sndBtnX = width_ - 70.0f, sndBtnY = 20.0f;
     float sndBtnSize = 55.0f;
@@ -181,14 +204,13 @@ void Renderer::handleInput() {
                 int pId = pointer.id;
 
                 if (px < width_ * 0.5f) {
+                    // Floating dynamic flight stick anchors wherever touched
                     stickActive_ = true;
                     stickPointerId_ = pId;
-                    float dx = px - stickCenterX;
-                    float dy = py - stickCenterY;
-                    stickDeflectX_ = CLAMP(dx / stickRadius, -1.0f, 1.0f);
-                    stickDeflectY_ = CLAMP(dy / stickRadius, -1.0f, 1.0f);
-                    planeRoll_  = stickDeflectX_ * 42.0f;
-                    planePitch_ = -stickDeflectY_ * 28.0f;
+                    stickOriginX_ = px;
+                    stickOriginY_ = py;
+                    stickDeflectX_ = 0.0f;
+                    stickDeflectY_ = 0.0f;
                 } else {
                     // Botón de Sonido Mute/Unmute
                     if (px >= sndBtnX && px <= sndBtnX + sndBtnSize && py >= sndBtnY && py <= sndBtnY + sndBtnSize) {
@@ -220,15 +242,17 @@ void Renderer::handleInput() {
                 float py = GameActivityPointerAxes_getY(&pointer);
                 int pId = pointer.id;
 
-                if (pId == stickPointerId_ || (px < width_ * 0.5f && !stickActive_)) {
-                    stickActive_ = true;
-                    stickPointerId_ = pId;
-                    float dx = px - stickCenterX;
-                    float dy = py - stickCenterY;
-                    stickDeflectX_ = CLAMP(dx / stickRadius, -1.0f, 1.0f);
-                    stickDeflectY_ = CLAMP(dy / stickRadius, -1.0f, 1.0f);
-                    planeRoll_  = stickDeflectX_ * 42.0f;
-                    planePitch_ = -stickDeflectY_ * 28.0f;
+                if (pId == stickPointerId_) {
+                    float dx = px - stickOriginX_;
+                    float dy = py - stickOriginY_;
+                    float maxR = 85.0f;
+                    float dist = std::sqrt(dx * dx + dy * dy);
+                    if (dist > maxR) {
+                        dx = (dx / dist) * maxR;
+                        dy = (dy / dist) * maxR;
+                    }
+                    stickDeflectX_ = dx / maxR;
+                    stickDeflectY_ = dy / maxR;
                 } else if (px >= width_ * 0.5f) {
                     if (px >= fireX0 && px <= fireX1 && py >= fireY0 && py <= fireY1) {
                         anyFire = true;
@@ -270,24 +294,24 @@ void Renderer::handleInput() {
 }
 
 void Renderer::renderSkyAndOcean() {
-    // 1. Cielo atmosférico (Quad de horizonte lejano)
+    // 1. Cielo atmosférico (Gradiente de horizonte lejano)
     static const float skyVerts[] = {
-        -250.0f,  60.0f, -220.0f,
-         250.0f,  60.0f, -220.0f,
-         250.0f,  -5.0f, -220.0f,
+        -260.0f,  75.0f, -240.0f,
+         260.0f,  75.0f, -240.0f,
+         260.0f,  -6.0f, -240.0f,
 
-        -250.0f,  60.0f, -220.0f,
-         250.0f,  -5.0f, -220.0f,
-        -250.0f,  -5.0f, -220.0f
+        -260.0f,  75.0f, -240.0f,
+         260.0f,  -6.0f, -240.0f,
+        -260.0f,  -6.0f, -240.0f
     };
     static const unsigned char skyColors[] = {
-        50, 140, 240, 255,
-        50, 140, 240, 255,
-        180, 220, 255, 255,
+        25, 75, 175, 255,
+        25, 75, 175, 255,
+        170, 215, 250, 255,
 
-        50, 140, 240, 255,
-        180, 220, 255, 255,
-        180, 220, 255, 255
+        25, 75, 175, 255,
+        170, 215, 250, 255,
+        170, 215, 250, 255
     };
 
     w3dEngine::Disable(w3dEngine::Texture2D);
@@ -299,37 +323,67 @@ void Renderer::renderSkyAndOcean() {
     w3dEngine::DrawTrianglesArray(6);
     w3dEngine::DisableArray(w3dEngine::ColorArray);
 
-    // 2. Océano / Mar 3D con textura animada
+    // 2. Océano 3D con malla subdividida 8x10 para evitar distorsión de perspectiva UV
     if (texSea_) {
-        float waveShift = timeSec_ * 0.12f;
-        static const float oceanVerts[] = {
-            -180.0f, -2.5f, -220.0f,
-             180.0f, -2.5f, -220.0f,
-             180.0f, -2.5f,   30.0f,
+        float waveShift = timeSec_ * 0.15f;
+        const int gridX = 8;
+        const int gridZ = 10;
+        const float minX = -180.0f, maxX = 180.0f;
+        const float minZ = -240.0f, maxZ = 30.0f;
+        const float stepX = (maxX - minX) / gridX;
+        const float stepZ = (maxZ - minZ) / gridZ;
 
-            -180.0f, -2.5f, -220.0f,
-             180.0f, -2.5f,   30.0f,
-            -180.0f, -2.5f,   30.0f
-        };
+        std::vector<float> oceanVerts;
+        std::vector<float> oceanUVs;
+        oceanVerts.reserve(gridX * gridZ * 18);
+        oceanUVs.reserve(gridX * gridZ * 12);
 
-        const float oceanUVs[] = {
-            0.0f,  20.0f + waveShift,
-            15.0f, 20.0f + waveShift,
-            15.0f, 0.0f  + waveShift,
+        for (int j = 0; j < gridZ; ++j) {
+            float z0 = minZ + j * stepZ;
+            float z1 = z0 + stepZ;
+            float v0 = (float)j / gridZ * 18.0f + waveShift;
+            float v1 = (float)(j + 1) / gridZ * 18.0f + waveShift;
 
-            0.0f,  20.0f + waveShift,
-            15.0f, 0.0f  + waveShift,
-            0.0f,  0.0f  + waveShift
-        };
+            for (int i = 0; i < gridX; ++i) {
+                float x0 = minX + i * stepX;
+                float x1 = x0 + stepX;
+                float u0 = (float)i / gridX * 14.0f;
+                float u1 = (float)(i + 1) / gridX * 14.0f;
+
+                // Triangle 1
+                oceanVerts.insert(oceanVerts.end(), {
+                    x0, -2.5f, z0,
+                    x1, -2.5f, z0,
+                    x1, -2.5f, z1
+                });
+                oceanUVs.insert(oceanUVs.end(), {
+                    u0, v0,
+                    u1, v0,
+                    u1, v1
+                });
+
+                // Triangle 2
+                oceanVerts.insert(oceanVerts.end(), {
+                    x0, -2.5f, z0,
+                    x1, -2.5f, z1,
+                    x0, -2.5f, z1
+                });
+                oceanUVs.insert(oceanUVs.end(), {
+                    u0, v0,
+                    u1, v1,
+                    u0, v1
+                });
+            }
+        }
 
         w3dEngine::Enable(w3dEngine::Texture2D);
         w3dEngine::BindTexture(texSea_->getTextureID());
         w3dEngine::Color4f(1.0f, 1.0f, 1.0f, 1.0f);
         w3dEngine::EnableArray(w3dEngine::VertexArray);
         w3dEngine::EnableArray(w3dEngine::TexCoordArray);
-        w3dEngine::VertexPointer3f(0, oceanVerts);
-        w3dEngine::TexCoordPointer2f(0, oceanUVs);
-        w3dEngine::DrawTrianglesArray(6);
+        w3dEngine::VertexPointer3f(0, oceanVerts.data());
+        w3dEngine::TexCoordPointer2f(0, oceanUVs.data());
+        w3dEngine::DrawTrianglesArray(static_cast<int>(oceanVerts.size() / 3));
         w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     }
 }
@@ -339,44 +393,64 @@ void Renderer::renderIslands() {
 
     w3dEngine::Enable(w3dEngine::Texture2D);
     w3dEngine::BindTexture(texTerrain_->getTextureID());
+    w3dEngine::Color4f(1.0f, 1.0f, 1.0f, 1.0f);
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
-    // Isla Principal (Costa izquierda)
+    // Isla Principal Volcánica (Costa izquierda)
     w3dEngine::PushMatrix();
-    w3dEngine::Translatef(-38.0f, -2.5f, -90.0f);
+    w3dEngine::Translatef(-38.0f, -2.5f, -95.0f);
 
     static const float islandVerts[] = {
-        // Cima / Piramide montañosa
-        0.0f,  9.0f,  0.0f,   -18.0f, 0.0f,  15.0f,    18.0f, 0.0f,  15.0f,
-        0.0f,  9.0f,  0.0f,    18.0f, 0.0f,  15.0f,    22.0f, 0.0f, -16.0f,
-        0.0f,  9.0f,  0.0f,    22.0f, 0.0f, -16.0f,   -20.0f, 0.0f, -18.0f,
-        0.0f,  9.0f,  0.0f,   -20.0f, 0.0f, -18.0f,   -18.0f, 0.0f,  15.0f
+        // Cuña 1
+        0.0f, 10.5f, 0.0f,   18.0f, 0.0f, 0.0f,    13.0f, 0.0f, 14.0f,
+        // Cuña 2
+        0.0f, 10.5f, 0.0f,   13.0f, 0.0f, 14.0f,    0.0f, 0.0f, 20.0f,
+        // Cuña 3
+        0.0f, 10.5f, 0.0f,    0.0f, 0.0f, 20.0f,  -15.0f, 0.0f, 15.0f,
+        // Cuña 4
+        0.0f, 10.5f, 0.0f,  -15.0f, 0.0f, 15.0f,  -21.0f, 0.0f, 0.0f,
+        // Cuña 5
+        0.0f, 10.5f, 0.0f,  -21.0f, 0.0f, 0.0f,   -14.0f, 0.0f, -17.0f,
+        // Cuña 6
+        0.0f, 10.5f, 0.0f,  -14.0f, 0.0f, -17.0f,   0.0f, 0.0f, -22.0f,
+        // Cuña 7
+        0.0f, 10.5f, 0.0f,    0.0f, 0.0f, -22.0f,  15.0f, 0.0f, -14.0f,
+        // Cuña 8
+        0.0f, 10.5f, 0.0f,   15.0f, 0.0f, -14.0f,  18.0f, 0.0f, 0.0f
     };
     static const float islandUVs[] = {
-        0.5f, 0.1f,   0.0f, 1.0f,   1.0f, 1.0f,
-        0.5f, 0.1f,   0.0f, 1.0f,   1.0f, 1.0f,
-        0.5f, 0.1f,   0.0f, 1.0f,   1.0f, 1.0f,
-        0.5f, 0.1f,   0.0f, 1.0f,   1.0f, 1.0f
+        0.5f, 0.05f,   0.95f, 0.95f,   0.85f, 0.95f,
+        0.5f, 0.05f,   0.85f, 0.95f,   0.65f, 0.95f,
+        0.5f, 0.05f,   0.65f, 0.95f,   0.45f, 0.95f,
+        0.5f, 0.05f,   0.45f, 0.95f,   0.25f, 0.95f,
+        0.5f, 0.05f,   0.25f, 0.95f,   0.15f, 0.95f,
+        0.5f, 0.05f,   0.15f, 0.95f,   0.35f, 0.95f,
+        0.5f, 0.05f,   0.35f, 0.95f,   0.75f, 0.95f,
+        0.5f, 0.05f,   0.75f, 0.95f,   0.95f, 0.95f
     };
 
     w3dEngine::VertexPointer3f(0, islandVerts);
     w3dEngine::TexCoordPointer2f(0, islandUVs);
-    w3dEngine::DrawTrianglesArray(12);
+    w3dEngine::DrawTrianglesArray(24);
     w3dEngine::PopMatrix();
 
     // Atolón Derecho
     w3dEngine::PushMatrix();
-    w3dEngine::Translatef(42.0f, -2.5f, -130.0f);
+    w3dEngine::Translatef(44.0f, -2.5f, -135.0f);
     static const float atollVerts[] = {
-        0.0f,  5.5f,  0.0f,   -14.0f, 0.0f,  12.0f,    14.0f, 0.0f,  12.0f,
-        0.0f,  5.5f,  0.0f,    14.0f, 0.0f,  12.0f,    16.0f, 0.0f, -12.0f,
-        0.0f,  5.5f,  0.0f,    16.0f, 0.0f, -12.0f,   -15.0f, 0.0f, -14.0f,
-        0.0f,  5.5f,  0.0f,   -15.0f, 0.0f, -14.0f,   -14.0f, 0.0f,  12.0f
+        0.0f, 6.0f, 0.0f,   14.0f, 0.0f, 0.0f,    10.0f, 0.0f, 11.0f,
+        0.0f, 6.0f, 0.0f,   10.0f, 0.0f, 11.0f,    0.0f, 0.0f, 15.0f,
+        0.0f, 6.0f, 0.0f,    0.0f, 0.0f, 15.0f,  -11.0f, 0.0f, 11.0f,
+        0.0f, 6.0f, 0.0f,  -11.0f, 0.0f, 11.0f,  -15.0f, 0.0f, 0.0f,
+        0.0f, 6.0f, 0.0f,  -15.0f, 0.0f, 0.0f,   -10.0f, 0.0f, -12.0f,
+        0.0f, 6.0f, 0.0f,  -10.0f, 0.0f, -12.0f,   0.0f, 0.0f, -16.0f,
+        0.0f, 6.0f, 0.0f,    0.0f, 0.0f, -16.0f,  11.0f, 0.0f, -10.0f,
+        0.0f, 6.0f, 0.0f,   11.0f, 0.0f, -10.0f,  14.0f, 0.0f, 0.0f
     };
     w3dEngine::VertexPointer3f(0, atollVerts);
     w3dEngine::TexCoordPointer2f(0, islandUVs);
-    w3dEngine::DrawTrianglesArray(12);
+    w3dEngine::DrawTrianglesArray(24);
     w3dEngine::PopMatrix();
 
     w3dEngine::DisableArray(w3dEngine::TexCoordArray);
@@ -399,91 +473,92 @@ void Renderer::renderTarget() {
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
-    // Barco de guerra / Buque enemigo con casco 3D volumétrico completo
+    // Buque de combate naval enemigo (DDG-88) con orientación proa a -Z
     static const float shipVerts[] = {
         // --- 1. Cubierta Superior (Deck) ---
-        // Proa triangular
-         0.0f,  1.2f, -11.0f,   -3.0f,  1.2f,  -4.0f,    3.0f,  1.2f,  -4.0f,
-        // Casco medio
-        -3.0f,  1.2f,  -4.0f,   -3.0f,  1.2f,   8.5f,    3.0f,  1.2f,   8.5f,
-        -3.0f,  1.2f,  -4.0f,    3.0f,  1.2f,   8.5f,    3.0f,  1.2f,  -4.0f,
+        // Proa triangular apuntando hacia adelante (-Z)
+         0.0f,  1.2f, -10.0f,   -2.8f,  1.2f,  -4.0f,    2.8f,  1.2f,  -4.0f,
+        // Casco medio y popa con helipuerto
+        -2.8f,  1.2f,  -4.0f,   -2.8f,  1.2f,   8.0f,    2.8f,  1.2f,   8.0f,
+        -2.8f,  1.2f,  -4.0f,    2.8f,  1.2f,   8.0f,    2.8f,  1.2f,  -4.0f,
 
-        // --- 2. Costados del Casco hasta la Línea de Flotación (y = -1.2f) ---
+        // --- 2. Costados del Casco y Línea de Flotación (y = -1.2f) ---
         // Amura de babor (Port bow)
-        -3.0f,  1.2f,  -4.0f,    0.0f,  1.2f, -11.0f,    0.0f, -1.2f, -11.0f,
-        -3.0f,  1.2f,  -4.0f,    0.0f, -1.2f, -11.0f,   -3.0f, -1.2f,  -4.0f,
+        -2.8f,  1.2f,  -4.0f,    0.0f,  1.2f, -10.0f,    0.0f, -1.2f, -10.0f,
+        -2.8f,  1.2f,  -4.0f,    0.0f, -1.2f, -10.0f,   -2.8f, -1.2f,  -4.0f,
         // Amura de estribor (Starboard bow)
-         0.0f,  1.2f, -11.0f,    3.0f,  1.2f,  -4.0f,    3.0f, -1.2f,  -4.0f,
-         0.0f,  1.2f, -11.0f,    3.0f, -1.2f,  -4.0f,    0.0f, -1.2f, -11.0f,
+         0.0f,  1.2f, -10.0f,    2.8f,  1.2f,  -4.0f,    2.8f, -1.2f,  -4.0f,
+         0.0f,  1.2f, -10.0f,    2.8f, -1.2f,  -4.0f,    0.0f, -1.2f, -10.0f,
         // Costado de babor (Port flank)
-        -3.0f,  1.2f,  -4.0f,   -3.0f, -1.2f,  -4.0f,   -3.0f, -1.2f,   8.5f,
-        -3.0f,  1.2f,  -4.0f,   -3.0f, -1.2f,   8.5f,   -3.0f,  1.2f,   8.5f,
+        -2.8f,  1.2f,  -4.0f,   -2.8f, -1.2f,  -4.0f,   -2.8f, -1.2f,   8.0f,
+        -2.8f,  1.2f,  -4.0f,   -2.8f, -1.2f,   8.0f,   -2.8f,  1.2f,   8.0f,
         // Costado de estribor (Starboard flank)
-         3.0f,  1.2f,  -4.0f,    3.0f,  1.2f,   8.5f,    3.0f, -1.2f,   8.5f,
-         3.0f,  1.2f,  -4.0f,    3.0f, -1.2f,   8.5f,    3.0f, -1.2f,  -4.0f,
+         2.8f,  1.2f,  -4.0f,    2.8f,  1.2f,   8.0f,    2.8f, -1.2f,   8.0f,
+         2.8f,  1.2f,  -4.0f,    2.8f, -1.2f,   8.0f,    2.8f, -1.2f,  -4.0f,
         // Espejo de popa (Stern transom)
-        -3.0f,  1.2f,   8.5f,    3.0f,  1.2f,   8.5f,    3.0f, -1.2f,   8.5f,
-        -3.0f,  1.2f,   8.5f,    3.0f, -1.2f,   8.5f,   -3.0f, -1.2f,   8.5f,
+        -2.8f,  1.2f,   8.0f,    2.8f,  1.2f,   8.0f,    2.8f, -1.2f,   8.0f,
+        -2.8f,  1.2f,   8.0f,    2.8f, -1.2f,   8.0f,   -2.8f, -1.2f,   8.0f,
 
-        // --- 3. Superestructura / Castillo de Mando ---
+        // --- 3. Superestructura / Castillo de Mando (Bridge) ---
         // Techo de la torre
-        -1.5f,  3.6f,  -1.0f,    1.5f,  3.6f,  -1.0f,    1.5f,  3.6f,   3.0f,
-        -1.5f,  3.6f,  -1.0f,    1.5f,  3.6f,   3.0f,   -1.5f,  3.6f,   3.0f,
-        // Pared frontal de la torre
-        -1.5f,  3.6f,  -1.0f,    1.5f,  1.2f,  -1.0f,    1.5f,  3.6f,  -1.0f,
-        -1.5f,  3.6f,  -1.0f,   -1.5f,  1.2f,  -1.0f,    1.5f,  1.2f,  -1.0f,
-        // Pared babor de la torre
-        -1.5f,  3.6f,  -1.0f,   -1.5f,  3.6f,   3.0f,   -1.5f,  1.2f,   3.0f,
-        -1.5f,  3.6f,  -1.0f,   -1.5f,  1.2f,   3.0f,   -1.5f,  1.2f,  -1.0f,
-        // Pared estribor de la torre
-         1.5f,  3.6f,  -1.0f,    1.5f,  1.2f,   3.0f,    1.5f,  3.6f,   3.0f,
-         1.5f,  3.6f,  -1.0f,    1.5f,  1.2f,  -1.0f,    1.5f,  1.2f,   3.0f,
-        // Pared trasera de la torre
-        -1.5f,  3.6f,   3.0f,    1.5f,  3.6f,   3.0f,    1.5f,  1.2f,   3.0f,
-        -1.5f,  3.6f,   3.0f,    1.5f,  1.2f,   3.0f,   -1.5f,  1.2f,   3.0f
+        -1.4f,  3.5f,  -1.2f,    1.4f,  3.5f,  -1.2f,    1.4f,  3.5f,   2.5f,
+        -1.4f,  3.5f,  -1.2f,    1.4f,  3.5f,   2.5f,   -1.4f,  3.5f,   2.5f,
+        // Pared frontal del puente
+        -1.4f,  3.5f,  -1.2f,    1.4f,  1.2f,  -1.2f,    1.4f,  3.5f,  -1.2f,
+        -1.4f,  3.5f,  -1.2f,   -1.4f,  1.2f,  -1.2f,    1.4f,  1.2f,  -1.2f,
+        // Pared babor
+        -1.4f,  3.5f,  -1.2f,   -1.4f,  3.5f,   2.5f,   -1.4f,  1.2f,   2.5f,
+        -1.4f,  3.5f,  -1.2f,   -1.4f,  1.2f,   2.5f,   -1.4f,  1.2f,  -1.2f,
+        // Pared estribor
+         1.4f,  3.5f,  -1.2f,    1.4f,  1.2f,   2.5f,    1.4f,  3.5f,   2.5f,
+         1.4f,  3.5f,  -1.2f,    1.4f,  1.2f,  -1.2f,    1.4f,  1.2f,   2.5f,
+        // Pared trasera
+        -1.4f,  3.5f,   2.5f,    1.4f,  3.5f,   2.5f,    1.4f,  1.2f,   2.5f,
+        -1.4f,  3.5f,   2.5f,    1.4f,  1.2f,   2.5f,   -1.4f,  1.2f,   2.5f
     };
 
     static const float shipUVs[] = {
-        // Cubierta
-        0.5f, 0.0f,   0.0f, 0.4f,   1.0f, 0.4f,
-        0.0f, 0.4f,   0.0f, 1.0f,   1.0f, 1.0f,
-        0.0f, 0.4f,   1.0f, 1.0f,   1.0f, 0.4f,
+        // Cubierta proa (Silos de misiles VLS)
+        0.25f, 0.95f,   0.10f, 0.60f,   0.45f, 0.60f,
+        // Cubierta popa (Helipuerto con insignia 'H')
+        0.55f, 0.60f,   0.55f, 0.95f,   0.95f, 0.95f,
+        0.55f, 0.60f,   0.95f, 0.95f,   0.95f, 0.60f,
 
-        // Casco amuras
-        0.1f, 0.5f,   0.4f, 0.5f,   0.4f, 0.8f,
-        0.1f, 0.5f,   0.4f, 0.8f,   0.1f, 0.8f,
-        0.4f, 0.5f,   0.7f, 0.5f,   0.7f, 0.8f,
-        0.4f, 0.5f,   0.7f, 0.8f,   0.4f, 0.8f,
+        // Casco amuras con línea de flotación roja en V = [0.0, 0.12]
+        0.10f, 0.45f,   0.45f, 0.45f,   0.45f, 0.05f,
+        0.10f, 0.45f,   0.45f, 0.05f,   0.10f, 0.05f,
+        0.45f, 0.45f,   0.85f, 0.45f,   0.85f, 0.05f,
+        0.45f, 0.45f,   0.85f, 0.05f,   0.45f, 0.05f,
 
-        // Costados
-        0.1f, 0.5f,   0.1f, 0.9f,   0.6f, 0.9f,
-        0.1f, 0.5f,   0.6f, 0.9f,   0.6f, 0.5f,
-        0.1f, 0.5f,   0.6f, 0.5f,   0.6f, 0.9f,
-        0.1f, 0.5f,   0.6f, 0.9f,   0.1f, 0.9f,
+        // Costados de casco (Placas de acero naval blindado)
+        0.10f, 0.45f,   0.10f, 0.05f,   0.85f, 0.05f,
+        0.10f, 0.45f,   0.85f, 0.05f,   0.85f, 0.45f,
+        0.10f, 0.45f,   0.85f, 0.45f,   0.85f, 0.05f,
+        0.10f, 0.45f,   0.85f, 0.05f,   0.10f, 0.45f,
 
         // Popa
-        0.3f, 0.5f,   0.7f, 0.5f,   0.7f, 0.8f,
-        0.3f, 0.5f,   0.7f, 0.8f,   0.3f, 0.8f,
+        0.25f, 0.45f,   0.75f, 0.45f,   0.75f, 0.05f,
+        0.25f, 0.45f,   0.75f, 0.05f,   0.25f, 0.05f,
 
-        // Torre techo
-        0.2f, 0.1f,   0.8f, 0.1f,   0.8f, 0.4f,
-        0.2f, 0.1f,   0.8f, 0.4f,   0.2f, 0.4f,
+        // Puente techo
+        0.25f, 0.65f,   0.75f, 0.65f,   0.75f, 0.85f,
+        0.25f, 0.65f,   0.75f, 0.85f,   0.25f, 0.85f,
 
-        // Torre frontal
-        0.2f, 0.1f,   0.8f, 0.4f,   0.8f, 0.1f,
-        0.2f, 0.1f,   0.2f, 0.4f,   0.8f, 0.4f,
+        // Puente frontal (Ventanales de mando de la torre)
+        0.20f, 0.45f,   0.80f, 0.25f,   0.80f, 0.45f,
+        0.20f, 0.45f,   0.20f, 0.25f,   0.80f, 0.25f,
 
-        // Torre babor
-        0.2f, 0.1f,   0.6f, 0.1f,   0.6f, 0.4f,
-        0.2f, 0.1f,   0.6f, 0.4f,   0.2f, 0.4f,
+        // Puente babor
+        0.20f, 0.45f,   0.60f, 0.45f,   0.60f, 0.25f,
+        0.20f, 0.45f,   0.60f, 0.25f,   0.20f, 0.25f,
 
-        // Torre estribor
-        0.2f, 0.1f,   0.6f, 0.4f,   0.6f, 0.1f,
-        0.2f, 0.1f,   0.2f, 0.4f,   0.6f, 0.4f,
+        // Puente estribor
+        0.20f, 0.45f,   0.60f, 0.25f,   0.60f, 0.45f,
+        0.20f, 0.45f,   0.20f, 0.25f,   0.60f, 0.25f,
 
-        // Torre trasera
-        0.3f, 0.1f,   0.7f, 0.1f,   0.7f, 0.4f,
-        0.3f, 0.1f,   0.7f, 0.4f,   0.3f, 0.4f
+        // Puente trasero
+        0.30f, 0.45f,   0.70f, 0.45f,   0.70f, 0.25f,
+        0.30f, 0.45f,   0.70f, 0.25f,   0.30f, 0.25f
     };
 
     w3dEngine::VertexPointer3f(0, shipVerts);
@@ -499,13 +574,16 @@ void Renderer::renderAircraft() {
     if (!texAirplane_) return;
 
     w3dEngine::PushMatrix();
-    // Posición del avión frente a la cámara de persecución
+    // Posición del caza frente a la cámara en persecución
     w3dEngine::Translatef(planeX_, planeY_ - 0.5f, -6.5f);
 
-    // Rotaciones de vuelo: Balanceo (Roll), Cabeceo (Pitch), Guiñada (Yaw)
-    w3dEngine::Rotatef(planeRoll_,  0.0f, 0.0f, 1.0f);
-    w3dEngine::Rotatef(planePitch_, 1.0f, 0.0f, 0.0f);
-    w3dEngine::Rotatef(planeYaw_,   0.0f, 1.0f, 0.0f);
+    // Rotaciones de vuelo aerodinámicas:
+    // Balanceo (Roll): inclinación al virar
+    w3dEngine::Rotatef(-planeRoll_,  0.0f, 0.0f, 1.0f);
+    // Cabeceo (Pitch): cabeceo hacia arriba/abajo (eje X)
+    w3dEngine::Rotatef(planePitch_,  1.0f, 0.0f, 0.0f);
+    // Guiñada (Yaw): nariz vira hacia la dirección de giro
+    w3dEngine::Rotatef(-planeYaw_,   0.0f, 1.0f, 0.0f);
 
     w3dEngine::Enable(w3dEngine::Texture2D);
     w3dEngine::BindTexture(texAirplane_->getTextureID());
@@ -513,78 +591,104 @@ void Renderer::renderAircraft() {
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
-    // Geometría del Caza 3D (Fuselaje, Alas delta, Estabilizadores dobles, Cabina)
+    // Modelo 3D del Caza de Combate orientado hacia adelante (-Z hacia el horizonte)
     static const float jetVerts[] = {
-        // --- 1. Fuselaje Frontal & Nariz ---
-         0.0f,  0.0f,  3.2f,   -0.5f,  0.2f,  0.8f,    0.5f,  0.2f,  0.8f, // Dorso nariz
-         0.0f,  0.0f,  3.2f,    0.5f, -0.2f,  0.8f,   -0.5f, -0.2f,  0.8f, // Vientre nariz
-         0.0f,  0.0f,  3.2f,   -0.5f, -0.2f,  0.8f,   -0.5f,  0.2f,  0.8f, // Costado izq
-         0.0f,  0.0f,  3.2f,    0.5f,  0.2f,  0.8f,    0.5f, -0.2f,  0.8f, // Costado der
+        // --- 1. Morro / Nariz aerodinámica (Nose Cone hacia -Z) ---
+         0.0f,  0.0f, -2.8f,   -0.38f,  0.0f, -1.1f,    0.0f,  0.18f, -1.1f, // Morro superior izq
+         0.0f,  0.0f, -2.8f,    0.0f,  0.18f, -1.1f,    0.38f,  0.0f, -1.1f, // Morro superior der
+         0.0f,  0.0f, -2.8f,    0.0f, -0.16f, -1.1f,   -0.38f,  0.0f, -1.1f, // Morro inferior izq
+         0.0f,  0.0f, -2.8f,    0.38f,  0.0f, -1.1f,    0.0f, -0.16f, -1.1f, // Morro inferior der
 
-        // --- 2. Cabina de Cristal (Cockpit Canopy) ---
-         0.0f,  0.6f,  0.2f,   -0.35f, 0.2f,  1.0f,    0.35f, 0.2f,  1.0f, // Parabrisas frontal
-         0.0f,  0.6f,  0.2f,    0.35f, 0.2f,  1.0f,    0.35f, 0.2f, -0.6f, // Lado derecho
-         0.0f,  0.6f,  0.2f,    0.35f, 0.2f, -0.6f,   -0.35f, 0.2f, -0.6f, // Posterior
-         0.0f,  0.6f,  0.2f,   -0.35f, 0.2f, -0.6f,   -0.35f, 0.2f,  1.0f, // Lado izquierdo
+        // --- 2. Cúpula de la Cabina (Cockpit Glass Bubble) ---
+         0.0f,  0.18f, -1.1f,  -0.22f,  0.18f, -0.2f,    0.0f,  0.46f, -0.2f, // Parabrisas izq
+         0.0f,  0.18f, -1.1f,   0.0f,  0.46f, -0.2f,    0.22f,  0.18f, -0.2f, // Parabrisas der
+         0.0f,  0.46f, -0.2f,  -0.22f,  0.18f, -0.2f,    0.0f,  0.22f,  0.6f, // Cristal popa izq
+         0.0f,  0.46f, -0.2f,   0.0f,  0.22f,  0.6f,    0.22f,  0.18f, -0.2f, // Cristal popa der
 
-        // --- 3. Fuselaje Central & Motores ---
-        -0.6f,  0.1f,  0.8f,   -0.6f,  0.1f, -2.2f,    0.6f,  0.1f, -2.2f,
-        -0.6f,  0.1f,  0.8f,    0.6f,  0.1f, -2.2f,    0.6f,  0.1f,  0.8f,
+        // --- 3. Fuselaje Central Dorsal y Vientre ---
+        // Dorso superior del fuselaje
+        -0.42f, 0.16f, -1.1f,  -0.52f, 0.16f,  1.6f,    0.52f, 0.16f,  1.6f,
+        -0.42f, 0.16f, -1.1f,   0.52f, 0.16f,  1.6f,    0.42f, 0.16f, -1.1f,
+        // Vientre inferior del fuselaje
+        -0.42f,-0.16f, -1.1f,   0.52f,-0.16f,  1.6f,   -0.52f,-0.16f,  1.6f,
+        -0.42f,-0.16f, -1.1f,   0.42f,-0.16f, -1.1f,    0.52f,-0.16f,  1.6f,
 
-        // --- 4. Alas Delta (Superior) ---
-         0.0f,  0.05f, 0.8f,   -3.4f,  0.05f, -1.2f,  -0.6f,  0.05f, -2.0f, // Ala izquierda
-         0.0f,  0.05f, 0.8f,    0.6f,  0.05f, -2.0f,   3.4f,  0.05f, -1.2f, // Ala derecha
+        // --- 4. Alas Delta en Flecha (Swept Delta Wings) ---
+        // Ala izquierda (Superficie Superior)
+        -0.42f, 0.05f, -0.7f,  -3.2f,  0.02f,  1.0f,   -0.52f, 0.05f,  1.4f,
+        // Ala izquierda (Superficie Inferior)
+        -0.42f,-0.02f, -0.7f,  -0.52f,-0.02f,  1.4f,   -3.2f, -0.02f,  1.0f,
+        // Ala derecha (Superficie Superior)
+         0.42f, 0.05f, -0.7f,   0.52f, 0.05f,  1.4f,    3.2f,  0.02f,  1.0f,
+        // Ala derecha (Superficie Inferior)
+         0.42f,-0.02f, -0.7f,   3.2f, -0.02f,  1.0f,    0.52f,-0.02f,  1.4f,
 
-        // --- 5. Estabilizadores Verticales Dobles (Twin Tails) ---
-        -0.45f, 0.1f, -1.5f,   -0.65f, 1.2f, -2.4f,   -0.45f, 0.1f, -2.4f,  // Cola izq
-         0.45f, 0.1f, -1.5f,    0.45f, 0.1f, -2.4f,    0.65f, 1.2f, -2.4f   // Cola der
+        // --- 5. Estabilizadores Verticales Dobles Inclinados (Twin Tails) ---
+        // Cola izquierda
+        -0.40f, 0.16f,  0.6f,  -0.65f, 1.15f,  1.6f,   -0.40f, 0.16f,  1.5f,
+        -0.40f, 0.16f,  0.6f,  -0.40f, 0.16f,  1.5f,   -0.65f, 1.15f,  1.6f,
+        // Cola derecha
+         0.40f, 0.16f,  0.6f,   0.40f, 0.16f,  1.5f,    0.65f, 1.15f,  1.6f,
+         0.40f, 0.16f,  0.6f,   0.65f, 1.15f,  1.6f,    0.40f, 0.16f,  1.5f
     };
 
     static const float jetUVs[] = {
-        // Nariz
-        0.2f, 0.2f,  0.1f, 0.5f,  0.3f, 0.5f,
-        0.2f, 0.2f,  0.3f, 0.5f,  0.1f, 0.5f,
-        0.2f, 0.2f,  0.1f, 0.5f,  0.1f, 0.4f,
-        0.2f, 0.2f,  0.3f, 0.4f,  0.3f, 0.5f,
+        // Morro superior (Camuflaje aeroespacial)
+        0.75f, 0.95f,  0.60f, 0.65f,  0.75f, 0.65f,
+        0.75f, 0.95f,  0.75f, 0.65f,  0.90f, 0.65f,
+        // Morro inferior (Gris claro de panza)
+        0.25f, 0.45f,  0.10f, 0.15f,  0.25f, 0.15f,
+        0.25f, 0.45f,  0.40f, 0.15f,  0.25f, 0.15f,
 
-        // Cabina (Mapeada a la esquina superior izquierda brillante de airplane.png)
-        0.22f, 0.1f,  0.05f, 0.4f,  0.4f, 0.4f,
-        0.22f, 0.1f,  0.4f,  0.4f,  0.4f, 0.2f,
-        0.22f, 0.1f,  0.4f,  0.2f,  0.05f, 0.2f,
-        0.22f, 0.1f,  0.05f, 0.2f,  0.05f, 0.4f,
+        // Cúpula / Cabina (Cristal con destello brillante U=[0,0.5], V=[0.5,1.0])
+        0.25f, 0.60f,  0.08f, 0.75f,  0.25f, 0.92f,
+        0.25f, 0.60f,  0.25f, 0.92f,  0.42f, 0.75f,
+        0.25f, 0.92f,  0.08f, 0.75f,  0.25f, 0.70f,
+        0.25f, 0.92f,  0.25f, 0.70f,  0.42f, 0.75f,
 
-        // Fuselaje central
-        0.1f, 0.5f,  0.1f, 0.9f,  0.4f, 0.9f,
-        0.1f, 0.5f,  0.4f, 0.9f,  0.4f, 0.5f,
+        // Dorso superior fuselaje
+        0.60f, 0.90f,  0.60f, 0.55f,  0.90f, 0.55f,
+        0.60f, 0.90f,  0.90f, 0.55f,  0.90f, 0.90f,
+        // Vientre inferior fuselaje
+        0.10f, 0.45f,  0.40f, 0.10f,  0.10f, 0.10f,
+        0.10f, 0.45f,  0.40f, 0.45f,  0.40f, 0.10f,
 
-        // Alas (Mapeadas a las insignias y escarapelas del cuadrante superior derecho)
-        0.6f, 0.1f,  0.55f, 0.5f, 0.95f, 0.5f,
-        0.6f, 0.1f,  0.95f, 0.5f, 0.55f, 0.5f,
+        // Alas Superiores (Con insignia de escarapela táctica en V=[0.55, 0.95])
+        0.60f, 0.60f,  0.95f, 0.95f,  0.95f, 0.60f,
+        0.10f, 0.10f,  0.45f, 0.45f,  0.45f, 0.10f,
+        0.60f, 0.60f,  0.95f, 0.60f,  0.95f, 0.95f,
+        0.10f, 0.10f,  0.45f, 0.10f,  0.45f, 0.45f,
 
         // Colas dobles
-        0.6f, 0.6f,  0.55f, 0.95f, 0.95f, 0.95f,
-        0.6f, 0.6f,  0.95f, 0.95f, 0.55f, 0.95f
+        0.65f, 0.60f,  0.88f, 0.95f,  0.88f, 0.60f,
+        0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
+        0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
+        0.65f, 0.60f,  0.88f, 0.95f,  0.88f, 0.60f
     };
 
     w3dEngine::VertexPointer3f(0, jetVerts);
     w3dEngine::TexCoordPointer2f(0, jetUVs);
-    w3dEngine::DrawTrianglesArray(42);
+    w3dEngine::DrawTrianglesArray(60);
 
-    // --- Llamas de Postcombustión (Afterburners) ---
-    float flamePulse = 0.8f + 0.3f * std::sin(timeSec_ * 30.0f);
+    // --- Llamas de Postcombustión Traseras (Afterburners proyectando hacia +Z, hacia la cámara) ---
+    float flamePulse = 0.85f + 0.35f * std::sin(timeSec_ * 32.0f);
     float flameVerts[] = {
-        // Motor izquierdo
-        -0.28f, -0.05f, -2.2f,   -0.12f, -0.05f, -2.2f,   -0.20f, -0.05f, -2.2f - (0.9f * flamePulse),
-        // Motor derecho
-         0.12f, -0.05f, -2.2f,    0.28f, -0.05f, -2.2f,    0.20f, -0.05f, -2.2f - (0.9f * flamePulse)
+        // Tobera / Llama motor izquierdo
+        -0.34f, -0.02f, 1.6f,   -0.16f, -0.02f, 1.6f,   -0.25f, -0.02f, 1.6f + (0.95f * flamePulse),
+        -0.25f,  0.07f, 1.6f,   -0.25f, -0.11f, 1.6f,   -0.25f, -0.02f, 1.6f + (0.95f * flamePulse),
+        // Tobera / Llama motor derecho
+         0.16f, -0.02f, 1.6f,    0.34f, -0.02f, 1.6f,    0.25f, -0.02f, 1.6f + (0.95f * flamePulse),
+         0.25f,  0.07f, 1.6f,    0.25f, -0.11f, 1.6f,    0.25f, -0.02f, 1.6f + (0.95f * flamePulse)
     };
     static const float flameUVs[] = {
-        0.7f, 0.7f,  0.9f, 0.7f,  0.8f, 0.95f,
-        0.7f, 0.7f,  0.9f, 0.7f,  0.8f, 0.95f
+        0.65f, 0.15f,  0.85f, 0.15f,  0.75f, 0.35f,
+        0.65f, 0.15f,  0.85f, 0.15f,  0.75f, 0.35f,
+        0.65f, 0.15f,  0.85f, 0.15f,  0.75f, 0.35f,
+        0.65f, 0.15f,  0.85f, 0.15f,  0.75f, 0.35f
     };
     w3dEngine::VertexPointer3f(0, flameVerts);
     w3dEngine::TexCoordPointer2f(0, flameUVs);
-    w3dEngine::DrawTrianglesArray(6);
+    w3dEngine::DrawTrianglesArray(12);
 
     w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     w3dEngine::Enable(w3dEngine::CullFace);
@@ -605,7 +709,7 @@ void Renderer::renderProjectiles() {
             bulletVerts.push_back(b.y);
             bulletVerts.push_back(b.z);
 
-            // Cola de la trazadora luminosa
+            // Cola de la trazadora luminosa hacia +Z (detrás del proyectil en vuelo hacia -Z)
             bulletVerts.push_back(b.x);
             bulletVerts.push_back(b.y);
             bulletVerts.push_back(b.z + 3.8f);
@@ -627,13 +731,13 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
     }
 
-    // 2. Destello de boca (Muzzle Flash) en los cañones de las alas
+    // 2. Destello de boca (Muzzle Flash) en las bocas de cañón de las alas
     if (muzzleFlashTime_ > 0.0f) {
         float mfVerts[] = {
-            planeX_ - 1.1f, planeY_ - 0.4f, -4.5f,
-            planeX_ - 1.1f, planeY_ - 0.4f, -5.8f,
-            planeX_ + 1.1f, planeY_ - 0.4f, -4.5f,
-            planeX_ + 1.1f, planeY_ - 0.4f, -5.8f
+            planeX_ - 0.9f, planeY_ - 0.2f, -7.2f,
+            planeX_ - 0.9f, planeY_ - 0.2f, -8.6f,
+            planeX_ + 0.9f, planeY_ - 0.2f, -7.2f,
+            planeX_ + 0.9f, planeY_ - 0.2f, -8.6f
         };
         static const unsigned char mfColors[] = {
             255, 255, 200, 255,   255, 150, 40, 220,
@@ -650,18 +754,18 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
     }
 
-    // 3. Misil guiado hacia el objetivo
+    // 3. Misil guiado hacia el objetivo naval
     if (missileFlightTime_ > 0.0f) {
         float progress = CLAMP(1.0f - (missileFlightTime_ / 1.6f), 0.0f, 1.0f);
         float mX = planeX_ * (1.0f - progress) + targetX_ * progress;
-        float mY = (planeY_ - 0.5f) * (1.0f - progress) + targetY_ * progress;
-        float mZ = -8.0f * (1.0f - progress) + targetZ_ * progress;
+        float mY = (planeY_ - 0.4f) * (1.0f - progress) + targetY_ * progress;
+        float mZ = -7.5f * (1.0f - progress) + targetZ_ * progress;
 
         w3dEngine::PushMatrix();
         w3dEngine::Translatef(mX, mY, mZ);
         static const float mslVerts[] = {
-             0.0f,  0.0f,  0.8f,   -0.15f, 0.0f, -0.6f,    0.15f, 0.0f, -0.6f,
-             0.0f,  0.15f, -0.6f,  -0.15f, 0.0f, -0.6f,    0.15f, 0.0f, -0.6f
+             0.0f,  0.0f, -0.8f,   -0.15f, 0.0f,  0.6f,    0.15f, 0.0f,  0.6f,
+             0.0f,  0.15f,  0.6f,  -0.15f, 0.0f,  0.6f,    0.15f, 0.0f,  0.6f
         };
         static const unsigned char mslColors[] = {
             255, 255, 255, 255,   200, 40, 40, 255,   200, 40, 40, 255,
@@ -691,14 +795,15 @@ void Renderer::renderHUDQuad(float x, float y, float w, float h, GLuint texId, f
         x + w, y + h,
         x,     y + h
     };
+    // UVs ajustados con flip vertical en OpenGL para iconos 2D verticales y directos
     static const float qUVs[] = {
-        0.0f, 0.0f,
+        0.0f, 1.0f,
+        1.0f, 1.0f,
         1.0f, 0.0f,
-        1.0f, 1.0f,
 
-        0.0f, 0.0f,
-        1.0f, 1.0f,
-        0.0f, 1.0f
+        0.0f, 1.0f,
+        1.0f, 0.0f,
+        0.0f, 0.0f
     };
 
     w3dEngine::Enable(w3dEngine::Texture2D);
@@ -777,7 +882,7 @@ void Renderer::renderGameUI() {
         renderHUDQuad(rx, ry, reticleSize, reticleSize, texHudCrosshair_->getTextureID(), targetLocked_ ? 1.0f : 0.85f);
 
         if (targetLocked_) {
-            // Corchetes tácticos de enganche (Lock brackets) en rojo vivo / amarillo
+            // Corchetes tácticos de enganche (Lock brackets) en rojo vivo
             float bSize = 18.0f;
             float pad = 10.0f;
             float bx0 = rx - pad;
@@ -821,9 +926,9 @@ void Renderer::renderGameUI() {
         // Blip del jugador (centro del radar, rombo verde esmeralda)
         renderHUDRect(rcX - 3.5f, rcY - 3.5f, 7.0f, 7.0f, 0.0f, 1.0f, 0.45f, 1.0f);
 
-        // Blip del buque enemigo relativo a la posición y avance
+        // Blip del buque enemigo relativo a la posición (-Z hacia adelante)
         float relX = (targetX_ - planeX_) / 60.0f;
-        float relZ = (targetZ_ - (-6.5f)) / 140.0f; // -Z hacia adelante (hacia arriba en radar)
+        float relZ = (targetZ_ - (-6.5f)) / 140.0f;
         float dist = std::sqrt(relX * relX + relZ * relZ);
         if (dist > 1.0f) {
             relX /= dist;
@@ -845,22 +950,24 @@ void Renderer::renderGameUI() {
         }
     }
 
-    // 3. Stick Virtual de Vuelo (Esquina inferior izquierda) con pomo desplazable
+    // 3. Stick Virtual de Vuelo Flotante Reactivo
     if (texBtnStick_) {
-        float stickCenterX = 110.0f;
-        float stickCenterY = (height_ > 0) ? (height_ - 120.0f) : 400.0f;
+        float baseCenterX = stickActive_ ? stickOriginX_ : 120.0f;
+        float baseCenterY = stickActive_ ? stickOriginY_ : ((height_ > 0) ? (height_ - 130.0f) : 400.0f);
+
         // Base del stick
-        renderHUDQuad(stickCenterX - 55.0f, stickCenterY - 55.0f, 110.0f, 110.0f,
-                      texBtnStick_->getTextureID(), stickActive_ ? 0.95f : 0.65f);
-        // Pomo / Indicador de pulgar reactivo
-        float knobX = stickCenterX - 28.0f + (stickDeflectX_ * 32.0f);
-        float knobY = stickCenterY - 28.0f + (stickDeflectY_ * 32.0f);
+        renderHUDQuad(baseCenterX - 55.0f, baseCenterY - 55.0f, 110.0f, 110.0f,
+                      texBtnStick_->getTextureID(), stickActive_ ? 0.92f : 0.50f);
+
+        // Pomo indicador de pulgar
+        float knobX = baseCenterX - 28.0f + (stickDeflectX_ * 32.0f);
+        float knobY = baseCenterY - 28.0f + (stickDeflectY_ * 32.0f);
         renderHUDQuad(knobX, knobY, 56.0f, 56.0f,
-                      texBtnStick_->getTextureID(), stickActive_ ? 1.0f : 0.85f);
+                      texBtnStick_->getTextureID(), stickActive_ ? 1.0f : 0.70f);
     }
 
     // 4. Botones Tácticos de Armamento (Esquina inferior derecha)
-    // Botón de Cañón / Fuego
+    // Botón de Cañón / Fuego continuo
     if (texBtnFire_) {
         float fireW = 115.0f;
         float fx = width_ - 145.0f;
@@ -893,12 +1000,12 @@ void Renderer::renderGameUI() {
         }
     }
 
-    // 5. Barras Digitales de Estado y Telemetría HUD
-    // Velocidad (Speed SPD: 480 KTS) - Superior Izquierda al lado del radar
+    // 5. Barras Digitales de Telemetría HUD
+    // Velocidad (Speed SPD: 480 KTS)
     float speedPct = CLAMP((speedKnots_ - 380.0f) / 200.0f, 0.0f, 1.0f);
     renderHUDBar(155.0f, 65.0f, 110.0f, 12.0f, speedPct, 0.0f, 0.9f, 0.8f, 0.9f);
 
-    // Altitud (Altitude ALT: 2,400 FT) - Superior Izquierda bajo velocidad
+    // Altitud (Altitude ALT: 2,400 FT)
     float altPct = CLAMP((altitudeFeet_ - 1500.0f) / 1800.0f, 0.0f, 1.0f);
     renderHUDBar(155.0f, 85.0f, 110.0f, 12.0f, altPct, 0.0f, 0.85f, 1.0f, 0.9f);
 
@@ -906,7 +1013,7 @@ void Renderer::renderGameUI() {
     float hullBarW = 200.0f;
     renderHUDBar((width_ - hullBarW) * 0.5f, height_ - 30.0f, hullBarW, 10.0f, healthPct_, 0.2f, 0.95f, 0.3f, 0.85f);
 
-    // Banner Superior Táctico: Estado de Objetivo / Vida del Buque
+    // Banner Superior Táctico: Barra de Vida del Buque Objetivo
     float bannerW = 240.0f;
     float bannerX = (width_ - bannerW) * 0.5f;
     float bannerY = 35.0f;
@@ -938,19 +1045,25 @@ void Renderer::renderWhisk3D() {
     float dt = 0.01667f;
     timeSec_ += dt;
 
-    // Dinámica de vuelo y telemetría
+    // Dinámica de vuelo y suavizado aerodinámico
     if (stickActive_) {
-        planeX_ += (-planeRoll_ * 0.0035f);
-        planeY_ += (planePitch_ * 0.0030f);
-        planeYaw_ = -planeRoll_ * 0.26f;
+        targetRoll_  = stickDeflectX_ * 42.0f;
+        targetPitch_ = -stickDeflectY_ * 26.0f;
+        targetYaw_   = stickDeflectX_ * 16.0f;
+
+        planeX_ += stickDeflectX_ * 0.14f;
+        planeY_ += (-stickDeflectY_) * 0.11f;
     } else {
         // Estabilizador aerodinámico suave cuando se suelta el stick
-        planeRoll_  *= 0.92f;
-        planePitch_ *= 0.92f;
-        planeYaw_   *= 0.92f;
-        planeRoll_  += std::sin(timeSec_ * 1.5f) * 0.5f;
-        planePitch_ += std::cos(timeSec_ * 1.0f) * 0.25f;
+        targetRoll_  = std::sin(timeSec_ * 1.5f) * 1.2f;
+        targetPitch_ = std::cos(timeSec_ * 1.0f) * 0.6f;
+        targetYaw_   = 0.0f;
     }
+
+    // Interpolación suave para evitar saltos bruscos
+    planeRoll_  += (targetRoll_ - planeRoll_) * 0.18f;
+    planePitch_ += (targetPitch_ - planePitch_) * 0.18f;
+    planeYaw_   += (targetYaw_ - planeYaw_) * 0.18f;
 
     // Límites de envolvente de vuelo
     planeX_ = CLAMP(planeX_, -5.5f, 5.5f);
@@ -968,13 +1081,13 @@ void Renderer::renderWhisk3D() {
     // Desplazamiento del buque de combate enemigo
     targetZ_ += 0.26f;
     if (targetZ_ > 8.0f) {
-        // Buque rebasado, respawn hacia adelante
-        targetZ_ = -130.0f;
-        targetX_ = std::sin(timeSec_ * 0.6f) * 22.0f;
+        // Buque rebasado, respawn hacia adelante en -Z
+        targetZ_ = -140.0f;
+        targetX_ = std::sin(timeSec_ * 0.6f) * 20.0f;
         targetHealth_ = targetMaxHealth_;
     }
 
-    // Comprobación de enganche táctico (Target Lock)
+    // Comprobación de enganche táctico (Target Lock) hacia adelante (-Z)
     float relTargetX = targetX_ - planeX_;
     float relTargetY = (targetY_ + 1.2f) - (planeY_ - 0.5f);
     float relTargetZ = targetZ_ - (-6.5f);
@@ -996,19 +1109,19 @@ void Renderer::renderWhisk3D() {
             if (sndCannon_) {
                 w3dEngine::W3dSoundPlayPitch(sndCannon_, 0.55f, false, 0.94f + (rand() % 12) * 0.01f);
             }
-            // Disparar dos proyectiles gemelos desde las alas
+            // Disparar dos proyectiles gemelos desde las alas hacia adelante (-Z)
             Bullet b1;
-            b1.x = planeX_ - 1.1f;
-            b1.y = planeY_ - 0.4f;
-            b1.z = -7.0f;
-            b1.vx = -planeRoll_ * 0.08f;
-            b1.vy = planePitch_ * 0.08f;
-            b1.vz = -170.0f;
+            b1.x = planeX_ - 0.9f;
+            b1.y = planeY_ - 0.3f;
+            b1.z = -7.2f;
+            b1.vx = (planeRoll_ * 0.06f);
+            b1.vy = (planePitch_ * 0.06f);
+            b1.vz = -180.0f;
             b1.life = 0.85f;
             bullets_.push_back(b1);
 
             Bullet b2 = b1;
-            b2.x = planeX_ + 1.1f;
+            b2.x = planeX_ + 0.9f;
             bullets_.push_back(b2);
         }
     } else {
@@ -1043,7 +1156,7 @@ void Renderer::renderWhisk3D() {
                     w3dEngine::W3dSoundPlay(sndExplosion_, 0.95f, false);
                 }
             }
-        } else if (it->life <= 0.0f || it->z < -250.0f) {
+        } else if (it->life <= 0.0f || it->z < -260.0f) {
             it = bullets_.erase(it);
         } else {
             ++it;
@@ -1080,13 +1193,13 @@ void Renderer::renderWhisk3D() {
     w3dEngine::Perspective(55.0f, aspect, 0.1f, 500.0f);
 
     // 3. Matriz ModelView de Cámara de persecución en 3ra persona con seguimiento cinemático
-    float camLagX = planeX_ * 0.38f;
-    float camLagY = planeY_ * 0.25f;
-    float camBank = planeRoll_ * 0.14f;
+    float camLagX = planeX_ * 0.35f;
+    float camLagY = planeY_ * 0.22f;
+    float camBank = planeRoll_ * 0.12f;
 
     w3dEngine::MatrixMode(w3dEngine::ModelView);
     w3dEngine::LoadIdentity();
-    w3dEngine::Rotatef(-camBank, 0.0f, 0.0f, 1.0f);
+    w3dEngine::Rotatef(camBank, 0.0f, 0.0f, 1.0f);
     w3dEngine::Translatef(-camLagX, -0.9f - camLagY, -2.0f);
 
     // 4. Estados 3D
@@ -1152,6 +1265,8 @@ void Renderer::initRenderer() {
                 }
                 return false;
             });
+
+    config_ = config;
 
     EGLint format;
     eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
