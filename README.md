@@ -1,14 +1,13 @@
 # ✈️ Whisk3D: Sky Strike
 
 <p align="center">
-  <img src="app/src/main/ic_launcher-playstore.png" width="160" height="160" alt="Whisk3D: Sky Strike Logo" />
+  <img src="app/src/main/ic_launcher-web.png" width="160" height="160" alt="Whisk3D: Sky Strike Logo" />
 </p>
 
 [![Android](https://img.shields.io/badge/Android-6.0%20(API%2023)%20a%20Android%2017%20(API%2037)-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
 [![ABI](https://img.shields.io/badge/ABI-arm64--v8a%20%7C%20armeabi--v7a%20%7C%20x86__64-0091EA?logo=arm&logoColor=white)](https://developer.android.com/ndk/guides/abis)
 [![NDK](https://img.shields.io/badge/NDK-r30--rc1-4CAF50?logo=android&logoColor=white)](https://developer.android.com/ndk)
 [![AGP](https://img.shields.io/badge/AGP-9.2.1-blue?logo=android)](https://developer.android.com/studio/releases/gradle-plugin)
-[![Google Play](https://img.shields.io/badge/Google%20Play-Target%20Ready-34A853?logo=googleplay&logoColor=white)](https://play.google.com/store)
 [![Licencia](https://img.shields.io/badge/Licencia-Apache%202.0-blue)](./LICENSE)
 
 > Nombre visible de la app: **Whisk3D: Sky Strike**.  
@@ -87,7 +86,7 @@ Whisk3D-Android/
 ├── app/
 │   ├── build.gradle              # Configuración de app (compileSdk 37, minSdk 23, NDK)
 │   └── src/main/
-│       ├── ic_launcher-playstore.png # Icono 512x512 para Google Play Store
+│       ├── ic_launcher-web.png       # Icono de alta resolución 512x512
 │       ├── cpp/
 │       │   ├── CMakeLists.txt    # Configuración de CMake para compilar Whisk3D Core
 │       │   ├── main.cpp          # Punto de entrada android_main con GameActivity
