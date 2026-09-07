@@ -47,8 +47,8 @@ Agradecimientos especiales a **Dante Leoncini** por concebir y liderar la arquit
 - 🎨 **Renderizado Retro:** Abstracción gráfica unificada sobre OpenGL ES 2.0 / 3.0 con soporte de texturas, iluminación, niebla, alpha blending y estética retro.
 - 📦 **I/O y Assets APK:** Integración directa con el `AAssetManager` de Android para cargar mallas `.w3dm`, texturas PNG/JPG y paquetes `.w3dpack`.
 - 🛠️ **Configuración moderna de Gradle:** Compatible con Gradle 9.6.0 y Android Gradle Plugin (AGP) 9.2.1.
-- 🧪 **Solo Debug:** Configurado sin dependencias de firmas de producción para facilitar el desarrollo y pruebas directas.
-- 💾 **Caché y Builds en `/tmp`:** Configurado como en *Flash-EEPROM-Tool* para redirigir Gradle cache y build outputs a `/tmp`, protegiendo el almacenamiento local.
+- 💾 **Caché y Builds en `/tmp`:** Redirección de Gradle cache y build outputs hacia `/tmp`, protegiendo el almacenamiento local y acelerando la compilación en RAM/tmpfs.
+- 🔊 **Audio Nativo OpenSL ES:** Mezclador por software estéreo a 44.1 kHz con efectos de turbina, cañón, misiles e impactos navales, con botón de sonido (MUTE/ON) en el HUD.
 
 ---
 
