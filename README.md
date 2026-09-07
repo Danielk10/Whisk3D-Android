@@ -3,7 +3,19 @@
 > **Lema:** *Potencia 3D retro y liviana para Android: simplicidad, portabilidad y rendimiento nativo en C++.*  
 > *(Bringing classic retro 3D game power to Android with lightweight C++ and modern GameActivity).*
 
-Whisk3D Android es la implementación y plantilla oficial para ejecutar el motor de videojuegos 3D/2D **Whisk3D Core** en dispositivos Android modernos utilizando **Google GameActivity** del Android Game Development Kit (AGDK) y C++ nativo.
+**Whisk3D Android** es la implementación y plantilla oficial para ejecutar el motor de videojuegos 3D/2D en dispositivos Android modernos utilizando **Google GameActivity** del Android Game Development Kit (AGDK) y C++ nativo.
+
+---
+
+## 👥 Créditos y Origen
+
+Este proyecto está basado en el motor **[Whisk3D Core](https://github.com/Dante-Leoncini/Whisk3D-Core)** desarrollado por **[Dante Leoncini](https://github.com/Dante-Leoncini)** ([@soykhaler](https://github.com/soykhaler)).
+
+- **Repositorio original del Core:** [https://github.com/Dante-Leoncini/Whisk3D-Core](https://github.com/Dante-Leoncini/Whisk3D-Core)
+- **Comunidad en Telegram:** [https://t.me/Whisk3D](https://t.me/Whisk3D)
+- **Ejemplos oficiales del motor:** [https://github.com/Dante-Leoncini/Whisk3D-Examples](https://github.com/Dante-Leoncini/Whisk3D-Examples)
+
+Agradecimientos especiales a **Dante Leoncini** por concebir y liderar la arquitectura de este motor gráfico 3D retro y ultraligero.
 
 ---
 
@@ -51,7 +63,7 @@ Whisk3D-Android/
 │       │   ├── main.cpp          # Punto de entrada android_main con GameActivity
 │       │   ├── Renderer.cpp      # Render loop inicializando y dibujando con Whisk3D
 │       │   ├── include/GL/gl.h   # Shim portable de OpenGL para Android NDK
-│       │   └── whisk3d/          # Código fuente completo de Whisk3D Core
+│       │   └── whisk3d/          # Código fuente de Whisk3D Core (por Dante Leoncini)
 │       ├── java/                 # Actividad Android Java vinculada con GameActivity
 │       └── res/                  # Recursos de Android (iconos, temas)
 ├── gradle/
@@ -66,4 +78,5 @@ Whisk3D-Android/
 
 ## 📜 Licencia
 
-Distribuido bajo la Licencia **Apache 2.0**. Consulta el archivo [`LICENSE`](./LICENSE) para más detalles.
+Distribuido bajo la Licencia **Apache 2.0**. Consulta el archivo [`LICENSE`](./LICENSE) para más detalles.  
+El código de **Whisk3D Core** en `app/src/main/cpp/whisk3d/` pertenece a **Dante Leoncini** bajo licencia **MIT**.
