@@ -40,17 +40,25 @@ private:
     void updateRenderArea();
     void initWhisk3D();
     void loadGameTextures();
+    void initWorldEnvironment();
     void resetMission();
 
     // 3D Scene Rendering
     void renderWhisk3D();
     void renderSkyAndOcean();
-    void renderIslands();
+    void renderSun();
+    void renderClouds();
+    void renderIslandsAndTrees();
     void renderAircraft();
+    void renderEnemyJets();
     void renderTarget();
     void renderProjectiles();
+    void renderExplosions();
 
-    // 2D HUD & Menu UI Rendering
+    void spawnExplosion(float x, float y, float z, float maxRadius = 3.6f, float r = 1.0f, float g = 0.5f, float b = 0.15f);
+    void spawnEnemySquadron();
+
+    // 2D HUD & Menu UI Rendering (Optimized for Portrait Mode)
     void renderGameUI();
     void renderMainMenuUI();
     void renderPauseUI();
@@ -77,6 +85,7 @@ private:
     bool showHelpModal_;
     int highScore_;
     float flakCooldown_;
+    float enemySpawnTimer_;
 
     // Player Flight Telemetry & Controls
     float planePitch_;
@@ -94,7 +103,7 @@ private:
     int missileCount_;
     int enemiesDestroyed_;
 
-    // Target state
+    // Target state (Warship / Boss DDG)
     float targetX_;
     float targetY_;
     float targetZ_;
@@ -103,15 +112,20 @@ private:
     float targetHitFlashTime_;
     bool targetLocked_;
     bool prevTargetLocked_;
+    float warshipTurretAngle_;
 
-    // Touch Controls State
+    // Multi-touch Controls State (Rock solid Pointer-ID tracking)
+    int stickPointerId_;
+    int firePointerId_;
+    int missilePointerId_;
     bool touchDown_;
     float touchX_;
     float touchY_;
     bool stickActive_;
-    int stickPointerId_;
     float stickOriginX_;
     float stickOriginY_;
+    float stickKnobX_;
+    float stickKnobY_;
     float stickDeflectX_;
     float stickDeflectY_;
     bool firePressed_;
@@ -119,6 +133,8 @@ private:
     float cannonCooldown_;
     float muzzleFlashTime_;
     float missileFlightTime_;
+    int missileTargetMode_; // 0: Warship, 1: Enemy Jet
+    int missileTargetIdx_;
 
     struct Bullet {
         float x, y, z;
@@ -134,6 +150,52 @@ private:
     };
     std::vector<EnemyBullet> enemyBullets_;
 
+    struct EnemyJet {
+        float x, y, z;
+        float vx, vy, vz;
+        float roll, pitch, yaw;
+        float health;
+        float maxHealth;
+        float fireCooldown;
+        float hitFlashTime;
+        bool active;
+        int type;
+        float flightTimer;
+    };
+    std::vector<EnemyJet> enemyJets_;
+
+    struct CloudInstance {
+        float x, y, z;
+        float scaleX, scaleY;
+        float speed;
+        float alpha;
+    };
+    std::vector<CloudInstance> clouds_;
+
+    struct IslandEntity {
+        float x, z;
+        float scale;
+        float angle;
+        int type;
+    };
+    std::vector<IslandEntity> islands_;
+
+    struct Tree3D {
+        float x, y, z;
+        float scale;
+    };
+    std::vector<Tree3D> trees_;
+
+    struct ExplosionFX {
+        float x, y, z;
+        float radius;
+        float maxRadius;
+        float life;
+        float maxLife;
+        float r, g, b;
+    };
+    std::vector<ExplosionFX> explosions_;
+
     // Audio State & Sounds
     bool soundEnabled_;
     int engineVoiceId_;
@@ -145,9 +207,13 @@ private:
 
     // In-game 3D & HUD Textures
     std::shared_ptr<TextureAsset> texAirplane_;
+    std::shared_ptr<TextureAsset> texEnemyJet_;
     std::shared_ptr<TextureAsset> texSea_;
     std::shared_ptr<TextureAsset> texTerrain_;
     std::shared_ptr<TextureAsset> texTarget_;
+    std::shared_ptr<TextureAsset> texSun_;
+    std::shared_ptr<TextureAsset> texCloud_;
+    std::shared_ptr<TextureAsset> texFxExplosion_;
     std::shared_ptr<TextureAsset> texHudCrosshair_;
     std::shared_ptr<TextureAsset> texHudRadar_;
     std::shared_ptr<TextureAsset> texBtnFire_;
