@@ -34,6 +34,8 @@ public:
     bool canRender() const { return surface_ != EGL_NO_SURFACE && context_ != EGL_NO_CONTEXT; }
     void onWindowInit();
     void onWindowTerm();
+    void onPause();
+    void onResume();
 
 private:
     void initRenderer();
@@ -176,6 +178,7 @@ private:
         float life;
         float maxLife;
         float r, g, b, a;
+        float angle;
     };
     std::vector<SmokeParticle> missileSmoke_;
 
@@ -232,8 +235,19 @@ private:
         float life;
         float maxLife;
         float r, g, b;
+        float angle;
     };
     std::vector<ExplosionFX> explosions_;
+
+    struct ExplosionDebris {
+        float x, y, z;
+        float vx, vy, vz;
+        float size;
+        float life;
+        float maxLife;
+        float r, g, b;
+    };
+    std::vector<ExplosionDebris> explosionDebris_;
 
     // Audio State & Sounds
     bool soundEnabled_;

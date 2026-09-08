@@ -22,13 +22,31 @@ void handle_cmd(android_app *pApp, int32_t cmd) {
                 } else {
                     auto *pRenderer = reinterpret_cast<Renderer *>(pApp->userData);
                     pRenderer->onWindowInit();
+                    pRenderer->onResume();
                 }
             }
             break;
         case APP_CMD_TERM_WINDOW:
             if (pApp->userData != nullptr) {
                 auto *pRenderer = reinterpret_cast<Renderer *>(pApp->userData);
+                pRenderer->onPause();
                 pRenderer->onWindowTerm();
+            }
+            break;
+        case APP_CMD_PAUSE:
+        case APP_CMD_STOP:
+        case APP_CMD_LOST_FOCUS:
+            if (pApp->userData != nullptr) {
+                auto *pRenderer = reinterpret_cast<Renderer *>(pApp->userData);
+                pRenderer->onPause();
+            }
+            break;
+        case APP_CMD_START:
+        case APP_CMD_RESUME:
+        case APP_CMD_GAINED_FOCUS:
+            if (pApp->userData != nullptr) {
+                auto *pRenderer = reinterpret_cast<Renderer *>(pApp->userData);
+                pRenderer->onResume();
             }
             break;
         case APP_CMD_DESTROY:

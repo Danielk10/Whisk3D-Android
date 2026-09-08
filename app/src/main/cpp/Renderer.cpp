@@ -143,6 +143,16 @@ void Renderer::onWindowTerm() {
     }
 }
 
+void Renderer::onPause() {
+    w3dEngine::W3dAudioPause();
+}
+
+void Renderer::onResume() {
+    if (soundEnabled_) {
+        w3dEngine::W3dAudioResume();
+    }
+}
+
 void Renderer::initWorldEnvironment() {
     clouds_.clear();
     islands_.clear();
@@ -224,6 +234,7 @@ void Renderer::resetMission() {
     enemyBullets_.clear();
     enemyJets_.clear();
     explosions_.clear();
+    explosionDebris_.clear();
 
     stickPointerId_ = -1;
     firePointerId_ = -1;
@@ -261,7 +272,7 @@ void Renderer::initWhisk3D() {
         sndLock_      = w3dEngine::W3dSoundLoad("sounds/lock.wav");
 
         if (sndEngine_) {
-            engineVoiceId_ = w3dEngine::W3dSoundPlay(sndEngine_, 0.25f, true);
+            engineVoiceId_ = w3dEngine::W3dSoundPlay(sndEngine_, 0.16f, true);
         }
     }
 
@@ -314,14 +325,58 @@ void Renderer::spawnExplosion(float x, float y, float z, float maxRadius, float 
     exp.x = x;
     exp.y = y;
     exp.z = z;
-    exp.radius = 0.5f;
+    exp.radius = 0.4f;
     exp.maxRadius = maxRadius;
-    exp.life = 0.75f;
-    exp.maxLife = 0.75f;
+    exp.life = 0.65f;
+    exp.maxLife = 0.65f;
     exp.r = r;
     exp.g = g;
     exp.b = b;
+    exp.angle = (rand() % 628) * 0.01f;
     explosions_.push_back(exp);
+
+    // Para impactos medios/grandes, generar explosiones secundarias escalonadas y chispas
+    if (maxRadius >= 2.0f) {
+        int extraCount = (maxRadius >= 4.5f) ? 3 : 1;
+        for (int k = 0; k < extraCount; ++k) {
+            ExplosionFX sub;
+            sub.x = x + (rand() % 20 - 10) * 0.08f * maxRadius;
+            sub.y = y + (rand() % 20 - 10) * 0.08f * maxRadius;
+            sub.z = z + (rand() % 20 - 10) * 0.08f * maxRadius;
+            sub.radius = 0.3f;
+            sub.maxRadius = maxRadius * (0.55f + (rand() % 30) * 0.01f);
+            sub.life = 0.55f + (rand() % 20) * 0.01f;
+            sub.maxLife = sub.life;
+            sub.r = r;
+            sub.g = g * 0.9f;
+            sub.b = b * 0.8f;
+            sub.angle = (rand() % 628) * 0.01f;
+            explosions_.push_back(sub);
+        }
+
+        // Chispas y restos incandescentes volando con física y gravedad
+        int debrisCount = (maxRadius >= 5.0f) ? 14 : 7;
+        for (int k = 0; k < debrisCount; ++k) {
+            ExplosionDebris deb;
+            deb.x = x;
+            deb.y = y;
+            deb.z = z;
+            float spd = 12.0f + (rand() % 35) * 0.5f;
+            float phi = (rand() % 628) * 0.01f;
+            float costheta = (rand() % 200 - 100) * 0.01f;
+            float sintheta = std::sqrt(std::max(0.0f, 1.0f - costheta * costheta));
+            deb.vx = spd * sintheta * std::cos(phi);
+            deb.vy = std::fabs(spd * sintheta * std::sin(phi)) + 6.0f; // Impulso ascendente
+            deb.vz = spd * costheta;
+            deb.size = 0.15f + (rand() % 15) * 0.01f;
+            deb.life = 0.45f + (rand() % 35) * 0.01f;
+            deb.maxLife = deb.life;
+            deb.r = 1.0f;
+            deb.g = 0.65f + (rand() % 35) * 0.01f;
+            deb.b = 0.15f;
+            explosionDebris_.push_back(deb);
+        }
+    }
 }
 
 void Renderer::spawnEnemySquadron() {
@@ -429,34 +484,43 @@ void Renderer::handleInput() {
                     if (showHelpModal_) {
                         showHelpModal_ = false;
                         if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.6f, false);
-                    } else {
-                        // Botón de sonido (Esquina superior derecha: width_ - 70, y=22)
-                        float sX = width_ - 70.0f, sY = 22.0f;
-                        if (px >= sX - 20.0f && px <= sX + 70.0f && py >= sY - 15.0f && py <= sY + 70.0f) {
-                            soundEnabled_ = !soundEnabled_;
-                            w3dEngine::W3dAudioMasterVolume(soundEnabled_ ? 1.0f : 0.0f);
-                            if (soundEnabled_ && sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.55f, false);
-                            continue;
-                        }
+                        continue;
+                    }
 
-                        // Botón AYUDA / MANUAL (?)
-                        float btnW = std::min(width_ * 0.80f, 330.0f);
-                        float btnH = 76.0f;
-                        float by = height_ * 0.52f;
-                        float hBtnW = std::min(width_ * 0.65f, 240.0f);
-                        float hBtnH = 48.0f;
-                        float hx = (width_ - hBtnW) * 0.5f;
-                        float hy = by + btnH + 46.0f;
-                        if (px >= hx - 15.0f && px <= hx + hBtnW + 15.0f && py >= hy - 10.0f && py <= hy + hBtnH + 10.0f) {
-                            showHelpModal_ = true;
-                            if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.65f, false);
-                            continue;
-                        }
+                    // Botón de sonido (Esquina superior derecha)
+                    float sndX = (float)width_ - 64.0f;
+                    float sndY = 20.0f;
+                    float sndSize = 48.0f;
+                    if (px >= sndX - 12.0f && px <= sndX + sndSize + 12.0f && py >= sndY - 12.0f && py <= sndY + sndSize + 12.0f) {
+                        soundEnabled_ = !soundEnabled_;
+                        w3dEngine::W3dAudioMasterVolume(soundEnabled_ ? 1.0f : 0.0f);
+                        if (soundEnabled_ && sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.55f, false);
+                        continue;
+                    }
 
-                        // Botón JUGAR / DESPEGAR o Tocar cualquier parte de la pantalla para iniciar
+                    // Botón AYUDA / MANUAL (?)
+                    float btnW = std::min((float)width_ * 0.82f, 320.0f);
+                    float btnH = 68.0f;
+                    float bx = ((float)width_ - btnW) * 0.5f;
+                    float by = (float)height_ * 0.48f;
+
+                    float hBtnW = std::min((float)width_ * 0.72f, 260.0f);
+                    float hBtnH = 48.0f;
+                    float hx = ((float)width_ - hBtnW) * 0.5f;
+                    float hy = by + btnH + 48.0f;
+
+                    if (px >= hx - 12.0f && px <= hx + hBtnW + 12.0f && py >= hy - 12.0f && py <= hy + hBtnH + 12.0f) {
+                        showHelpModal_ = true;
+                        if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.65f, false);
+                        continue;
+                    }
+
+                    // Botón JUGAR / DESPEGAR (Solo inicia pulsando este botón)
+                    if (px >= bx - 12.0f && px <= bx + btnW + 12.0f && py >= by - 12.0f && py <= by + btnH + 12.0f) {
                         resetMission();
                         gameState_ = STATE_PLAYING;
                         if (sndLock_) w3dEngine::W3dSoundPlay(sndLock_, 0.85f, false);
+                        continue;
                     }
                 }
             }
@@ -1360,52 +1424,72 @@ void Renderer::renderTarget() {
 }
 
 void Renderer::renderProjectiles() {
-    // 1. Trazadoras Láser del Cañón (Cintas 3D Volumétricas y Brillantes)
+    // 1. Trazadoras Láser del Cañón (Dardos de Plasma Supónicos Incandescentes)
     if (!bullets_.empty()) {
         std::vector<float> bulletVerts;
         std::vector<unsigned char> bulletColors;
-        bulletVerts.reserve(bullets_.size() * 36);
-        bulletColors.reserve(bullets_.size() * 48);
+        bulletVerts.reserve(bullets_.size() * 54);
+        bulletColors.reserve(bullets_.size() * 72);
 
         for (const auto& b : bullets_) {
-            float hw = 0.14f;
-            float len = 5.8f;
-            // Cinta horizontal (XY)
-            bulletVerts.insert(bulletVerts.end(), {
-                b.x - hw, b.y, b.z,
-                b.x + hw, b.y, b.z,
-                b.x + hw, b.y, b.z + len,
+            float hw = 0.035f; // Estilizado, afilado y elegante
+            float len = 2.4f;
 
-                b.x - hw, b.y, b.z,
-                b.x + hw, b.y, b.z + len,
-                b.x - hw, b.y, b.z + len
+            // Cinta horizontal cruzada con punta cónica y cola afilada
+            bulletVerts.insert(bulletVerts.end(), {
+                b.x - hw * 0.3f, b.y, b.z,
+                b.x + hw * 0.3f, b.y, b.z,
+                b.x + hw,        b.y, b.z + len * 0.35f,
+
+                b.x - hw * 0.3f, b.y, b.z,
+                b.x + hw,        b.y, b.z + len * 0.35f,
+                b.x - hw,        b.y, b.z + len * 0.35f,
+
+                b.x - hw,        b.y, b.z + len * 0.35f,
+                b.x + hw,        b.y, b.z + len * 0.35f,
+                b.x,             b.y, b.z + len
             });
-            // Cinta vertical (XZ)
-            bulletVerts.insert(bulletVerts.end(), {
-                b.x, b.y - hw, b.z,
-                b.x, b.y + hw, b.z,
-                b.x, b.y + hw, b.z + len,
 
-                b.x, b.y - hw, b.z,
-                b.x, b.y + hw, b.z + len,
-                b.x, b.y - hw, b.z + len
+            // Cinta vertical cruzada
+            bulletVerts.insert(bulletVerts.end(), {
+                b.x, b.y - hw * 0.3f, b.z,
+                b.x, b.y + hw * 0.3f, b.z,
+                b.x, b.y + hw,        b.z + len * 0.35f,
+
+                b.x, b.y - hw * 0.3f, b.z,
+                b.x, b.y + hw,        b.z + len * 0.35f,
+                b.x, b.y - hw,        b.z + len * 0.35f,
+
+                b.x, b.y - hw,        b.z + len * 0.35f,
+                b.x, b.y + hw,        b.z + len * 0.35f,
+                b.x, b.y,             b.z + len
             });
 
             for (int k = 0; k < 2; ++k) {
+                // Punta: blanco incandescente (255, 255, 240, 255)
+                // Centro: oro radiante (255, 210, 50, 240)
+                // Cola: naranja suave que desvanece (255, 80, 10, 0)
                 bulletColors.insert(bulletColors.end(), {
-                    255, 255, 220, 255,
-                    255, 255, 220, 255,
-                    255, 120,  20, 180,
+                    255, 255, 240, 255,
+                    255, 255, 240, 255,
+                    255, 210,  50, 240,
 
-                    255, 255, 220, 255,
-                    255, 120,  20, 180,
-                    255, 120,  20, 180
+                    255, 255, 240, 255,
+                    255, 210,  50, 240,
+                    255, 210,  50, 240,
+
+                    255, 210,  50, 240,
+                    255, 210,  50, 240,
+                    255,  80,  10,   0
                 });
             }
         }
 
         w3dEngine::Disable(w3dEngine::Texture2D);
         w3dEngine::Disable(w3dEngine::CullFace);
+        w3dEngine::Enable(w3dEngine::Blend);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+        w3dEngine::DepthMask(false);
         w3dEngine::Enable(w3dEngine::ColorMaterial);
         w3dEngine::EnableArray(w3dEngine::VertexArray);
         w3dEngine::EnableArray(w3dEngine::ColorArray);
@@ -1413,6 +1497,8 @@ void Renderer::renderProjectiles() {
         w3dEngine::ColorPointer4ub(bulletColors.data());
         w3dEngine::DrawTrianglesArray(static_cast<int>(bulletVerts.size() / 3));
         w3dEngine::DisableArray(w3dEngine::ColorArray);
+        w3dEngine::DepthMask(true);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
     }
 
     // 2. Destello de boca
@@ -1438,45 +1524,71 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
     }
 
-    // 3. Estelas de humo de misiles y bombas (Billboard Smoke Puffs)
+    // 3. Estelas de humo de misiles y bombas (Billboard Soft Smoke Puffs)
     if (!missileSmoke_.empty()) {
+        w3dEngine::Enable(w3dEngine::Blend);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+        w3dEngine::Disable(w3dEngine::CullFace);
+        w3dEngine::DepthMask(false);
+        w3dEngine::EnableArray(w3dEngine::VertexArray);
+
+        if (texFxExplosion_) {
+            w3dEngine::Enable(w3dEngine::Texture2D);
+            w3dEngine::BindTexture(texFxExplosion_->getTextureID());
+            w3dEngine::EnableArray(w3dEngine::TexCoordArray);
+        } else {
+            w3dEngine::Disable(w3dEngine::Texture2D);
+            w3dEngine::Enable(w3dEngine::ColorMaterial);
+        }
+
         std::vector<float> smkVerts;
+        std::vector<float> smkUVs;
         std::vector<unsigned char> smkColors;
         smkVerts.reserve(missileSmoke_.size() * 18);
+        if (texFxExplosion_) smkUVs.reserve(missileSmoke_.size() * 12);
         smkColors.reserve(missileSmoke_.size() * 24);
 
         for (const auto& sp : missileSmoke_) {
-            float sz = sp.size;
-            smkVerts.insert(smkVerts.end(), {
-                sp.x - sz, sp.y - sz, sp.z,
-                sp.x + sz, sp.y - sz, sp.z,
-                sp.x + sz, sp.y + sz, sp.z,
+            float c = std::cos(sp.angle) * sp.size;
+            float s = std::sin(sp.angle) * sp.size;
 
-                sp.x - sz, sp.y - sz, sp.z,
-                sp.x + sz, sp.y + sz, sp.z,
-                sp.x - sz, sp.y + sz, sp.z
+            smkVerts.insert(smkVerts.end(), {
+                sp.x - c + s, sp.y - s - c, sp.z,
+                sp.x + c + s, sp.y + s - c, sp.z,
+                sp.x + c - s, sp.y + s + c, sp.z,
+
+                sp.x - c + s, sp.y - s - c, sp.z,
+                sp.x + c - s, sp.y + s + c, sp.z,
+                sp.x - c - s, sp.y - s + c, sp.z
             });
-            unsigned char a = static_cast<unsigned char>(sp.a * 255.0f);
-            unsigned char r = static_cast<unsigned char>(sp.r * 255.0f);
-            unsigned char g = static_cast<unsigned char>(sp.g * 255.0f);
-            unsigned char b = static_cast<unsigned char>(sp.b * 255.0f);
+
+            if (texFxExplosion_) {
+                smkUVs.insert(smkUVs.end(), {
+                    0.505f, 0.005f,   0.995f, 0.005f,   0.995f, 0.495f,
+                    0.505f, 0.005f,   0.995f, 0.495f,   0.505f, 0.495f
+                });
+            }
+
+            unsigned char a = static_cast<unsigned char>(CLAMP(sp.a, 0.0f, 1.0f) * 255.0f);
+            unsigned char r = static_cast<unsigned char>(CLAMP(sp.r, 0.0f, 1.0f) * 255.0f);
+            unsigned char g = static_cast<unsigned char>(CLAMP(sp.g, 0.0f, 1.0f) * 255.0f);
+            unsigned char b = static_cast<unsigned char>(CLAMP(sp.b, 0.0f, 1.0f) * 255.0f);
             for (int k = 0; k < 6; ++k) {
                 smkColors.insert(smkColors.end(), { r, g, b, a });
             }
         }
 
-        w3dEngine::Disable(w3dEngine::Texture2D);
-        w3dEngine::Enable(w3dEngine::Blend);
-        w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
-        w3dEngine::DepthMask(false);
         w3dEngine::Enable(w3dEngine::ColorMaterial);
-        w3dEngine::EnableArray(w3dEngine::VertexArray);
         w3dEngine::EnableArray(w3dEngine::ColorArray);
         w3dEngine::VertexPointer3f(0, smkVerts.data());
+        if (texFxExplosion_) w3dEngine::TexCoordPointer2f(0, smkUVs.data());
         w3dEngine::ColorPointer4ub(smkColors.data());
         w3dEngine::DrawTrianglesArray(static_cast<int>(smkVerts.size() / 3));
+
         w3dEngine::DisableArray(w3dEngine::ColorArray);
+        if (texFxExplosion_) w3dEngine::DisableArray(w3dEngine::TexCoordArray);
         w3dEngine::DepthMask(true);
+        w3dEngine::Enable(w3dEngine::CullFace);
     }
 
     // 4. Misiles Guiados Activos en 3D
@@ -1598,50 +1710,66 @@ void Renderer::renderProjectiles() {
         w3dEngine::DisableArray(w3dEngine::ColorArray);
     }
 
-    // 6. Proyectiles antiaéreos (Flak) y balas de cazas enemigos (Trazadoras Rojas 3D)
+    // 6. Proyectiles antiaéreos (Flak) y balas de cazas enemigos (Dardos Carmesí Rápidos)
     if (!enemyBullets_.empty()) {
         std::vector<float> ebVerts;
         std::vector<unsigned char> ebColors;
-        ebVerts.reserve(enemyBullets_.size() * 36);
-        ebColors.reserve(enemyBullets_.size() * 48);
+        ebVerts.reserve(enemyBullets_.size() * 54);
+        ebColors.reserve(enemyBullets_.size() * 72);
 
         for (const auto& b : enemyBullets_) {
-            float hw = 0.16f;
-            float len = 5.2f;
+            float hw = 0.040f;
+            float len = 2.0f;
+            // Punta hacia +Z (hacia el jugador), cola hacia -Z
             ebVerts.insert(ebVerts.end(), {
-                b.x - hw, b.y, b.z,
-                b.x + hw, b.y, b.z,
-                b.x + hw, b.y, b.z - len,
+                b.x - hw * 0.3f, b.y, b.z,
+                b.x + hw * 0.3f, b.y, b.z,
+                b.x + hw,        b.y, b.z - len * 0.35f,
 
-                b.x - hw, b.y, b.z,
-                b.x + hw, b.y, b.z - len,
-                b.x - hw, b.y, b.z - len
+                b.x - hw * 0.3f, b.y, b.z,
+                b.x + hw,        b.y, b.z - len * 0.35f,
+                b.x - hw,        b.y, b.z - len * 0.35f,
+
+                b.x - hw,        b.y, b.z - len * 0.35f,
+                b.x + hw,        b.y, b.z - len * 0.35f,
+                b.x,             b.y, b.z - len
             });
             ebVerts.insert(ebVerts.end(), {
-                b.x, b.y - hw, b.z,
-                b.x, b.y + hw, b.z,
-                b.x, b.y + hw, b.z - len,
+                b.x, b.y - hw * 0.3f, b.z,
+                b.x, b.y + hw * 0.3f, b.z,
+                b.x, b.y + hw,        b.z - len * 0.35f,
 
-                b.x, b.y - hw, b.z,
-                b.x, b.y + hw, b.z - len,
-                b.x, b.y - hw, b.z - len
+                b.x, b.y - hw * 0.3f, b.z,
+                b.x, b.y + hw,        b.z - len * 0.35f,
+                b.x, b.y - hw,        b.z - len * 0.35f,
+
+                b.x, b.y - hw,        b.z - len * 0.35f,
+                b.x, b.y + hw,        b.z - len * 0.35f,
+                b.x, b.y,             b.z - len
             });
 
             for (int k = 0; k < 2; ++k) {
                 ebColors.insert(ebColors.end(), {
-                    255, 240, 150, 255,
-                    255, 240, 150, 255,
-                    255,  40,  20, 190,
+                    255, 230, 230, 255,
+                    255, 230, 230, 255,
+                    255,  40,  30, 230,
 
-                    255, 240, 150, 255,
-                    255,  40,  20, 190,
-                    255,  40,  20, 190
+                    255, 230, 230, 255,
+                    255,  40,  30, 230,
+                    255,  40,  30, 230,
+
+                    255,  40,  30, 230,
+                    255,  40,  30, 230,
+                    200,  10,  10,   0
                 });
             }
         }
 
         w3dEngine::Disable(w3dEngine::Texture2D);
         w3dEngine::Disable(w3dEngine::CullFace);
+        w3dEngine::Enable(w3dEngine::Blend);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+        w3dEngine::DepthMask(false);
         w3dEngine::Enable(w3dEngine::ColorMaterial);
         w3dEngine::EnableArray(w3dEngine::VertexArray);
         w3dEngine::EnableArray(w3dEngine::ColorArray);
@@ -1649,56 +1777,137 @@ void Renderer::renderProjectiles() {
         w3dEngine::ColorPointer4ub(ebColors.data());
         w3dEngine::DrawTrianglesArray(static_cast<int>(ebVerts.size() / 3));
         w3dEngine::DisableArray(w3dEngine::ColorArray);
+        w3dEngine::DepthMask(true);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
     }
 }
 
 void Renderer::renderExplosions() {
-    if (explosions_.empty()) return;
+    // 1. Explosiones animadas con sprite sheet 2x2
+    if (!explosions_.empty()) {
+        w3dEngine::Enable(w3dEngine::Blend);
+        w3dEngine::Disable(w3dEngine::CullFace);
+        w3dEngine::DepthMask(false);
+        w3dEngine::EnableArray(w3dEngine::VertexArray);
 
-    w3dEngine::Enable(w3dEngine::Blend);
-    w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
-    w3dEngine::Disable(w3dEngine::CullFace);
-    w3dEngine::DepthMask(false);
-    w3dEngine::EnableArray(w3dEngine::VertexArray);
+        if (texFxExplosion_) {
+            w3dEngine::Enable(w3dEngine::Texture2D);
+            w3dEngine::BindTexture(texFxExplosion_->getTextureID());
+            w3dEngine::EnableArray(w3dEngine::TexCoordArray);
+        } else {
+            w3dEngine::Disable(w3dEngine::Texture2D);
+            w3dEngine::Enable(w3dEngine::ColorMaterial);
+        }
 
-    if (texFxExplosion_) {
-        w3dEngine::Enable(w3dEngine::Texture2D);
-        w3dEngine::BindTexture(texFxExplosion_->getTextureID());
-        w3dEngine::EnableArray(w3dEngine::TexCoordArray);
-        static const float expUVs[] = {
-            0.0f, 0.0f,   1.0f, 0.0f,   1.0f, 1.0f,
-            0.0f, 0.0f,   1.0f, 1.0f,   0.0f, 1.0f
-        };
-        w3dEngine::TexCoordPointer2f(0, expUVs);
-    } else {
+        for (const auto& exp : explosions_) {
+            w3dEngine::PushMatrix();
+            w3dEngine::Translatef(exp.x, exp.y, exp.z);
+
+            float prog = 1.0f - (exp.life / exp.maxLife);
+            prog = CLAMP(prog, 0.0f, 1.0f);
+
+            // Determinar cuadrante animado (OpenGL invertido por stb_image)
+            float u0, u1, v0, v1;
+            if (prog < 0.22f) {
+                // Cuadrante 0: Destello estelar inicial
+                u0 = 0.005f; u1 = 0.495f; v0 = 0.505f; v1 = 0.995f;
+                w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+            } else if (prog < 0.52f) {
+                // Cuadrante 1: Bola de fuego densa
+                u0 = 0.505f; u1 = 0.995f; v0 = 0.505f; v1 = 0.995f;
+                w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+            } else if (prog < 0.80f) {
+                // Cuadrante 2: Expansión de humo ardiente
+                u0 = 0.005f; u1 = 0.495f; v0 = 0.005f; v1 = 0.495f;
+                w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+            } else {
+                // Cuadrante 3: Nube de humo y cenizas disipándose
+                u0 = 0.505f; u1 = 0.995f; v0 = 0.005f; v1 = 0.495f;
+                w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+            }
+
+            if (texFxExplosion_) {
+                float curUVs[] = {
+                    u0, v0,   u1, v0,   u1, v1,
+                    u0, v0,   u1, v1,   u0, v1
+                };
+                w3dEngine::TexCoordPointer2f(0, curUVs);
+            }
+
+            float c = std::cos(exp.angle) * exp.radius;
+            float s = std::sin(exp.angle) * exp.radius;
+            float expVerts[] = {
+                -c + s, -s - c, 0.0f,
+                 c + s,  s - c, 0.0f,
+                 c - s,  s + c, 0.0f,
+
+                -c + s, -s - c, 0.0f,
+                 c - s,  s + c, 0.0f,
+                -c - s, -s + c, 0.0f
+            };
+
+            float alpha = std::sin(prog * 3.14159f);
+            alpha = CLAMP(alpha * 1.25f, 0.0f, 1.0f);
+            w3dEngine::Color4f(exp.r, exp.g, exp.b, alpha);
+            w3dEngine::VertexPointer3f(0, expVerts);
+            w3dEngine::DrawTrianglesArray(6);
+
+            w3dEngine::PopMatrix();
+        }
+
+        if (texFxExplosion_) {
+            w3dEngine::DisableArray(w3dEngine::TexCoordArray);
+        }
+        w3dEngine::DepthMask(true);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+        w3dEngine::Enable(w3dEngine::CullFace);
+    }
+
+    // 2. Chispas y restos incandescentes volando con física (Debris)
+    if (!explosionDebris_.empty()) {
         w3dEngine::Disable(w3dEngine::Texture2D);
+        w3dEngine::Disable(w3dEngine::CullFace);
+        w3dEngine::Enable(w3dEngine::Blend);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+        w3dEngine::DepthMask(false);
         w3dEngine::Enable(w3dEngine::ColorMaterial);
+        w3dEngine::EnableArray(w3dEngine::VertexArray);
+        w3dEngine::EnableArray(w3dEngine::ColorArray);
+
+        std::vector<float> dVerts;
+        std::vector<unsigned char> dColors;
+        dVerts.reserve(explosionDebris_.size() * 18);
+        dColors.reserve(explosionDebris_.size() * 24);
+
+        for (const auto& deb : explosionDebris_) {
+            float s = deb.size;
+            dVerts.insert(dVerts.end(), {
+                deb.x - s, deb.y - s, deb.z,
+                deb.x + s, deb.y - s, deb.z,
+                deb.x + s, deb.y + s, deb.z,
+
+                deb.x - s, deb.y - s, deb.z,
+                deb.x + s, deb.y + s, deb.z,
+                deb.x - s, deb.y + s, deb.z
+            });
+            float a = CLAMP(deb.life / deb.maxLife, 0.0f, 1.0f);
+            unsigned char r = static_cast<unsigned char>(deb.r * 255.0f);
+            unsigned char g = static_cast<unsigned char>(deb.g * 255.0f);
+            unsigned char b = static_cast<unsigned char>(deb.b * 255.0f);
+            unsigned char alpha = static_cast<unsigned char>(a * 255.0f);
+            for (int k = 0; k < 6; ++k) {
+                dColors.insert(dColors.end(), { r, g, b, alpha });
+            }
+        }
+
+        w3dEngine::VertexPointer3f(0, dVerts.data());
+        w3dEngine::ColorPointer4ub(dColors.data());
+        w3dEngine::DrawTrianglesArray(static_cast<int>(dVerts.size() / 3));
+        w3dEngine::DisableArray(w3dEngine::ColorArray);
+        w3dEngine::DepthMask(true);
+        w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+        w3dEngine::Enable(w3dEngine::CullFace);
     }
-
-    for (const auto& exp : explosions_) {
-        w3dEngine::PushMatrix();
-        w3dEngine::Translatef(exp.x, exp.y, exp.z);
-
-        float r = exp.radius;
-        float expVerts[] = {
-            -r, -r, 0.0f,    r, -r, 0.0f,    r,  r, 0.0f,
-            -r, -r, 0.0f,    r,  r, 0.0f,   -r,  r, 0.0f
-        };
-
-        float alpha = CLAMP(exp.life / exp.maxLife, 0.0f, 1.0f);
-        w3dEngine::Color4f(exp.r, exp.g, exp.b, alpha);
-        w3dEngine::VertexPointer3f(0, expVerts);
-        w3dEngine::DrawTrianglesArray(6);
-
-        w3dEngine::PopMatrix();
-    }
-
-    if (texFxExplosion_) {
-        w3dEngine::DisableArray(w3dEngine::TexCoordArray);
-    }
-    w3dEngine::DepthMask(true);
-    w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
-    w3dEngine::Enable(w3dEngine::CullFace);
 }
 
 // ----------------------------------------------------------------------------
@@ -1929,10 +2138,10 @@ void Renderer::renderMainMenuUI() {
         renderDigits(bx + 30.0f, by + 18.0f, 22.0f, 28.0f, "DESPEGAR");
     }
 
-    // 4. Indicador Parpadeante: "TOCA PARA INICIAR"
+    // 4. Indicador Parpadeante: "PULSA DESPEGAR"
     float blink = 0.5f + 0.5f * std::sin(timeSec_ * 5.5f);
     if (blink > 0.40f) {
-        std::string tapStr = "TOCA PARA INICIAR";
+        std::string tapStr = "PULSA DESPEGAR";
         float tw = tapStr.size() * 13.0f * 0.78f;
         renderDigits(((float)width_ - tw) * 0.5f, by + btnH + 16.0f, 13.0f, 18.0f, tapStr);
     }
@@ -2147,12 +2356,12 @@ void Renderer::renderGameUI() {
     float bombImpactX = planeX_ + (planeRoll_ * 0.08f * tFall);
     float bsx, bsy;
     if (projectWorldToScreen(bombImpactX, -2.4f, bombImpactZ, bsx, bsy)) {
-        float bRad = 16.0f;
-        renderHUDLine(bsx - bRad, bsy, bsx + bRad, bsy, 1.0f, 0.85f, 0.1f, 0.75f, 1.8f);
-        renderHUDLine(bsx, bsy - bRad, bsx, bsy + bRad, 1.0f, 0.85f, 0.1f, 0.75f, 1.8f);
-        renderHUDLine(bsx - bRad * 0.7f, bsy - bRad * 0.7f, bsx + bRad * 0.7f, bsy + bRad * 0.7f, 1.0f, 0.7f, 0.1f, 0.5f, 1.2f);
-        renderHUDLine(bsx - bRad * 0.7f, bsy + bRad * 0.7f, bsx + bRad * 0.7f, bsy - bRad * 0.7f, 1.0f, 0.7f, 0.1f, 0.5f, 1.2f);
-        renderDigits(bsx - 14.0f, bsy + bRad + 2.0f, 8.0f, 12.0f, "BMB");
+        float bRad = 12.0f;
+        renderHUDLine(bsx - bRad, bsy, bsx, bsy - bRad, 1.0f, 0.85f, 0.1f, 0.65f, 1.5f);
+        renderHUDLine(bsx, bsy - bRad, bsx + bRad, bsy, 1.0f, 0.85f, 0.1f, 0.65f, 1.5f);
+        renderHUDLine(bsx + bRad, bsy, bsx, bsy + bRad, 1.0f, 0.85f, 0.1f, 0.65f, 1.5f);
+        renderHUDLine(bsx, bsy + bRad, bsx - bRad, bsy, 1.0f, 0.85f, 0.1f, 0.65f, 1.5f);
+        renderDigits(bsx - 10.0f, bsy + bRad + 2.0f, 7.0f, 10.0f, "BMB");
     }
 
     // 1c. Caja Táctica de Rastreo y Bloqueo sobre el Objetivo Real en 3D
@@ -2167,7 +2376,7 @@ void Renderer::renderGameUI() {
 
     float tsx, tsy;
     if (projectWorldToScreen(twx, twy, twz, tsx, tsy)) {
-        float boxSize = targetLocked_ ? 70.0f : 54.0f;
+        float boxSize = targetLocked_ ? 64.0f : 50.0f;
         float halfB = boxSize * 0.5f;
         float bx0 = tsx - halfB, by0 = tsy - halfB;
         float bx1 = tsx + halfB, by1 = tsy + halfB;
@@ -2178,25 +2387,24 @@ void Renderer::renderGameUI() {
         float b = targetLocked_ ? 0.15f : 0.20f;
         float a = targetLocked_ ? (0.85f + 0.15f * std::sin(timeSec_ * 14.0f)) : 0.65f;
 
-        // Corchetes tácticos sobre el objetivo 3D
-        renderHUDLine(bx0, by0, bx0 + bCorner, by0, r, g, b, a, 2.5f);
-        renderHUDLine(bx0, by0, bx0 + bCorner, r, g, b, a, 2.5f);
-        renderHUDLine(bx1, by0, bx1 - bCorner, by0, r, g, b, a, 2.5f);
-        renderHUDLine(bx1, by0, bx1, by0 + bCorner, r, g, b, a, 2.5f);
-        renderHUDLine(bx0, by1, bx0 + bCorner, by1, r, g, b, a, 2.5f);
-        renderHUDLine(bx0, by1, bx0, by1 - bCorner, r, g, b, a, 2.5f);
-        renderHUDLine(bx1, by1, bx1 - bCorner, by1, r, g, b, a, 2.5f);
-        renderHUDLine(bx1, by1, bx1, by1 - bCorner, r, g, b, a, 2.5f);
+        // Corchetes tácticos limpios sobre el objetivo 3D
+        renderHUDLine(bx0, by0, bx0 + bCorner, by0, r, g, b, a, 2.0f);
+        renderHUDLine(bx0, by0, bx0, by0 + bCorner, r, g, b, a, 2.0f);
+        renderHUDLine(bx1, by0, bx1 - bCorner, by0, r, g, b, a, 2.0f);
+        renderHUDLine(bx1, by0, bx1, by0 + bCorner, r, g, b, a, 2.0f);
+        renderHUDLine(bx0, by1, bx0 + bCorner, by1, r, g, b, a, 2.0f);
+        renderHUDLine(bx0, by1, bx0, by1 - bCorner, r, g, b, a, 2.0f);
+        renderHUDLine(bx1, by1, bx1 - bCorner, by1, r, g, b, a, 2.0f);
+        renderHUDLine(bx1, by1, bx1, by1 - bCorner, r, g, b, a, 2.0f);
 
         // Rombo central de fijación
-        float dSize = 8.0f;
-        renderHUDLine(tsx, tsy - dSize, tsx + dSize, tsy, r, g, b, a, 2.0f);
-        renderHUDLine(tsx + dSize, tsy, tsx, tsy + dSize, r, g, b, a, 2.0f);
-        renderHUDLine(tsx, tsy + dSize, tsx - dSize, tsy, r, g, b, a, 2.0f);
-        renderHUDLine(tsx - dSize, tsy, tsx, tsy - dSize, r, g, b, a, 2.0f);
+        float dSize = 7.0f;
+        renderHUDLine(tsx, tsy - dSize, tsx + dSize, tsy, r, g, b, a, 1.8f);
+        renderHUDLine(tsx + dSize, tsy, tsx, tsy + dSize, r, g, b, a, 1.8f);
+        renderHUDLine(tsx, tsy + dSize, tsx - dSize, tsy, r, g, b, a, 1.8f);
+        renderHUDLine(tsx - dSize, tsy, tsx, tsy - dSize, r, g, b, a, 1.8f);
 
         if (targetLocked_) {
-            renderHUDLine(gunSx, gunSy, tsx, tsy, 1.0f, 0.4f, 0.2f, 0.40f, 1.5f);
             std::string lockStr = "[ENGANCHADO]";
             float lsw = lockStr.size() * 11.0f * 0.78f;
             renderDigits(tsx - lsw * 0.5f, by1 + 4.0f, 10.0f, 14.0f, lockStr);
@@ -2526,15 +2734,17 @@ void Renderer::renderWhisk3D() {
             // Disparo del caza enemigo hacia el jugador (solo si está en frente)
             it->fireCooldown -= dt;
             if (it->fireCooldown <= 0.0f && it->z < -14.0f && it->z > -90.0f && !it->breakingAway) {
-                it->fireCooldown = 2.0f + (rand() % 12) * 0.1f;
+                it->fireCooldown = 1.8f + (rand() % 10) * 0.1f;
                 EnemyBullet eb;
                 eb.x = it->x + (rand() % 2 == 0 ? -0.7f : 0.7f);
                 eb.y = it->y - 0.1f;
                 eb.z = it->z + 1.8f;
-                eb.vx = (planeX_ - eb.x) * 0.35f;
-                eb.vy = (planeY_ - eb.y) * 0.35f;
-                eb.vz = 55.0f;
-                eb.life = 2.8f;
+                float distZ = (-6.5f) - eb.z;
+                float travelTime = (distZ > 5.0f) ? (distZ / 155.0f) : 0.2f;
+                eb.vx = (planeX_ + (rand() % 10 - 5) * 0.08f - eb.x) / travelTime;
+                eb.vy = ((planeY_ - 0.2f) - eb.y) / travelTime;
+                eb.vz = 155.0f;
+                eb.life = travelTime + 0.35f;
                 enemyBullets_.push_back(eb);
             }
 
@@ -2619,8 +2829,8 @@ void Renderer::renderWhisk3D() {
                 b1.z = -7.2f;
                 b1.vx = (planeRoll_ * 0.05f);
                 b1.vy = (planePitch_ * 0.05f);
-                b1.vz = -210.0f;
-                b1.life = 0.90f;
+                b1.vz = -390.0f;
+                b1.life = 0.65f;
                 bullets_.push_back(b1);
 
                 Bullet b2 = b1;
@@ -2736,6 +2946,7 @@ void Renderer::renderWhisk3D() {
             sp.life = 0.7f;
             sp.maxLife = 0.7f;
             sp.r = 0.95f; sp.g = 0.95f; sp.b = 0.95f; sp.a = 0.85f;
+            sp.angle = (rand() % 628) * 0.01f;
             missileSmoke_.push_back(sp);
 
             bool detonated = false;
@@ -2792,6 +3003,7 @@ void Renderer::renderWhisk3D() {
             sp.life = 0.45f;
             sp.maxLife = 0.45f;
             sp.r = 0.85f; sp.g = 0.85f; sp.b = 0.85f; sp.a = 0.6f;
+            sp.angle = (rand() % 628) * 0.01f;
             missileSmoke_.push_back(sp);
 
             bool detonated = false;
@@ -2809,16 +3021,16 @@ void Renderer::renderWhisk3D() {
                     targetX_ = (rand() % 28 - 14) * 1.0f;
                 }
                 if (sndExplosion_) w3dEngine::W3dSoundPlay(sndExplosion_, 1.0f, false);
-            } else if (it->y <= -2.4f || it->life <= 0.0f) {
+            } else if (it->y <= -2.5f) {
                 detonated = true;
                 spawnExplosion(it->x, -2.0f, it->z, 8.5f, 0.9f, 0.6f, 0.2f);
-                if (std::hypot(it->x - targetX_, it->z - targetZ_) < 16.0f) {
-                    targetHealth_ -= 30.0f;
-                    targetHitFlashTime_ = 0.35f;
-                }
                 for (auto &ej : enemyJets_) {
-                    if (ej.active && std::hypot(it->x - ej.x, it->z - ej.z) < 10.0f && ej.y < 2.5f) {
-                        ej.health -= 25.0f;
+                    if (!ej.active) continue;
+                    float dx = ej.x - it->x;
+                    float dz = ej.z - it->z;
+                    if (dx*dx + dz*dz < 100.0f) {
+                        ej.health -= 50.0f;
+                        ej.hitFlashTime = 0.3f;
                         if (ej.health <= 0.0f) {
                             ej.active = false;
                             enemiesDestroyed_++;
@@ -2829,7 +3041,7 @@ void Renderer::renderWhisk3D() {
                 if (sndExplosion_) w3dEngine::W3dSoundPlay(sndExplosion_, 1.0f, false);
             }
 
-            if (detonated) {
+            if (detonated || it->life <= 0.0f || it->z < -200.0f) {
                 it = bombs_.erase(it);
             } else {
                 ++it;
@@ -2842,8 +3054,8 @@ void Renderer::renderWhisk3D() {
             it->x += it->vx * dt;
             it->y += it->vy * dt;
             it->z += it->vz * dt;
-            it->size += dt * 0.8f;
-            it->a = (it->life / it->maxLife) * 0.85f;
+            it->size += dt * 1.1f;
+            it->a = (it->life / it->maxLife) * 0.75f;
             if (it->life <= 0.0f) {
                 it = missileSmoke_.erase(it);
             } else {
@@ -2851,37 +3063,53 @@ void Renderer::renderWhisk3D() {
             }
         }
 
-        // Fuego antiaéreo del buque (Flak)
+        // Fuego antiaéreo del buque (Flak de alta velocidad)
         flakCooldown_ -= dt;
         if (flakCooldown_ <= 0.0f) {
-            flakCooldown_ = 2.0f + (rand() % 10) * 0.1f;
+            flakCooldown_ = 1.8f + (rand() % 10) * 0.1f;
             if (targetZ_ < -20.0f && targetZ_ > -140.0f) {
                 EnemyBullet eb;
                 eb.x = targetX_ + (rand() % 4 - 2) * 0.6f;
                 eb.y = targetY_ + 2.8f;
                 eb.z = targetZ_ + 4.0f;
-                eb.vx = (planeX_ - eb.x) * 0.32f;
-                eb.vy = (planeY_ - eb.y) * 0.32f;
-                eb.vz = 55.0f;
-                eb.life = 3.2f;
+                float distZ = (-6.5f) - eb.z;
+                float travelTime = (distZ > 5.0f) ? (distZ / 145.0f) : 0.2f;
+                eb.vx = (planeX_ - eb.x) / travelTime;
+                eb.vy = ((planeY_ - 0.2f) - eb.y) / travelTime;
+                eb.vz = 145.0f;
+                eb.life = travelTime + 0.35f;
                 enemyBullets_.push_back(eb);
             }
         }
 
-        // Actualizar proyectiles antiaéreos enemigos
+        // Actualizar proyectiles antiaéreos enemigos con detección continua Swept-Z
         for (auto it = enemyBullets_.begin(); it != enemyBullets_.end(); ) {
+            float prevZ = it->z;
             it->x += it->vx * dt;
             it->y += it->vy * dt;
             it->z += it->vz * dt;
             it->life -= dt;
 
-            float dx = it->x - planeX_;
-            float dy = it->y - (planeY_ - 0.5f);
-            float dz = it->z - (-6.5f);
-            float dist = std::sqrt(dx*dx + dy*dy + dz*dz);
+            // Detección de impacto continua contra el avión del jugador
+            bool hit = false;
+            if (prevZ <= -5.8f && it->z >= -7.2f) {
+                float dx = it->x - planeX_;
+                float dy = it->y - (planeY_ - 0.4f);
+                if (dx * dx + dy * dy < 2.4f) {
+                    hit = true;
+                }
+            } else {
+                float dx = it->x - planeX_;
+                float dy = it->y - (planeY_ - 0.4f);
+                float dz = it->z - (-6.5f);
+                if (dx*dx + dy*dy + dz*dz < 2.2f) {
+                    hit = true;
+                }
+            }
 
-            if (dist < 1.7f) {
+            if (hit) {
                 healthPct_ -= 0.12f;
+                spawnExplosion(it->x, it->y, it->z, 1.8f, 1.0f, 0.45f, 0.15f);
                 it = enemyBullets_.erase(it);
                 if (healthPct_ <= 0.0f) {
                     healthPct_ = 0.0f;
@@ -2891,7 +3119,7 @@ void Renderer::renderWhisk3D() {
                     if (sndExplosion_) w3dEngine::W3dSoundPlay(sndExplosion_, 1.0f, false);
                     break;
                 }
-            } else if (it->life <= 0.0f || it->z > 10.0f) {
+            } else if (it->life <= 0.0f || it->z > 15.0f) {
                 it = enemyBullets_.erase(it);
             } else {
                 ++it;
@@ -2904,6 +3132,22 @@ void Renderer::renderWhisk3D() {
             it->radius += (it->maxRadius - it->radius) * 0.16f;
             if (it->life <= 0.0f) {
                 it = explosions_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Actualizar chispas de escombros de explosiones
+        for (auto it = explosionDebris_.begin(); it != explosionDebris_.end(); ) {
+            it->x += it->vx * dt;
+            it->y += it->vy * dt;
+            it->z += it->vz * dt;
+            it->vy -= 22.0f * dt;
+            it->vx *= 0.97f;
+            it->vz *= 0.97f;
+            it->life -= dt;
+            if (it->life <= 0.0f || it->y < -3.8f) {
+                it = explosionDebris_.erase(it);
             } else {
                 ++it;
             }

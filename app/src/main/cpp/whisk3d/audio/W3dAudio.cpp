@@ -304,6 +304,11 @@ void W3dAudioMix(short* out, int frames) {
     }
 }
 
+#if !defined(__ANDROID__)
+void W3dAudioPause() {}
+void W3dAudioResume() {}
+#endif
+
 #else // ---------------- modulo apagado: stubs ----------------
 
 bool W3dAudioInit(int) { return false; }
@@ -319,6 +324,8 @@ void W3dSoundStopFade(int, float) {}
 void W3dSoundStopAll() {}
 void W3dSoundSetVolume(int, float) {}
 void W3dAudioMasterVolume(float) {}
+void W3dAudioPause() {}
+void W3dAudioResume() {}
 void W3dAudioMix(short*, int) {}
 
 #endif

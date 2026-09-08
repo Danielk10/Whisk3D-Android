@@ -137,6 +137,18 @@ void W3dAudioBackendUnlock() {
     pthread_mutex_unlock(&s_audioMutex);
 }
 
+void W3dAudioPause() {
+    if (s_playerPlay) {
+        (*s_playerPlay)->SetPlayState(s_playerPlay, SL_PLAYSTATE_PAUSED);
+    }
+}
+
+void W3dAudioResume() {
+    if (s_playerPlay) {
+        (*s_playerPlay)->SetPlayState(s_playerPlay, SL_PLAYSTATE_PLAYING);
+    }
+}
+
 } // namespace w3dEngine
 
 #endif // W3D_ENABLE_AUDIO && __ANDROID__
