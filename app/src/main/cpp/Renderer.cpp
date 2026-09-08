@@ -49,6 +49,8 @@ Renderer::Renderer(android_app *pApp) :
         speedKnots_(480.0f),
         altitudeFeet_(2400.0f),
         healthPct_(1.0f),
+        planeHitFlashTime_(0.0f),
+        camShake_(0.0f),
         missileCount_(4),
         enemiesDestroyed_(0),
         targetX_(0.0f),
@@ -213,6 +215,8 @@ void Renderer::resetMission() {
     targetRoll_ = 0.0f;
     targetYaw_ = 0.0f;
     healthPct_ = 1.0f;
+    planeHitFlashTime_ = 0.0f;
+    camShake_ = 0.0f;
     missileCount_ = 4;
     bombCount_ = 4;
     bombCooldown_ = 0.0f;
@@ -325,55 +329,85 @@ void Renderer::spawnExplosion(float x, float y, float z, float maxRadius, float 
     exp.x = x;
     exp.y = y;
     exp.z = z;
-    exp.radius = 0.4f;
     exp.maxRadius = maxRadius;
-    exp.life = 0.65f;
-    exp.maxLife = 0.65f;
+    exp.radius = maxRadius * 0.45f; // Frame 0: estallido visible inmediato, CERO retardo
+    exp.life = (maxRadius <= 1.5f) ? 0.22f : ((maxRadius <= 4.0f) ? 0.48f : 0.65f);
+    exp.maxLife = exp.life;
     exp.r = r;
     exp.g = g;
     exp.b = b;
     exp.angle = (rand() % 628) * 0.01f;
+    exp.rotSpeed = ((rand() % 200) - 100) * 0.02f;
+    exp.type = 0; // Bola de fuego
     explosions_.push_back(exp);
 
-    // Para impactos medios/grandes, generar explosiones secundarias escalonadas y chispas
-    if (maxRadius >= 2.0f) {
-        int extraCount = (maxRadius >= 4.5f) ? 3 : 1;
+    // Anillo de choque supersónico expansivo para explosiones notables (cazas, misiles, buque, bombas)
+    if (maxRadius >= 3.5f) {
+        ExplosionFX ring;
+        ring.x = x;
+        ring.y = y;
+        ring.z = z;
+        ring.radius = maxRadius * 0.30f;
+        ring.maxRadius = maxRadius * 1.60f;
+        ring.life = 0.26f; // Anillo veloz y contundente
+        ring.maxLife = 0.26f;
+        ring.r = 1.0f;
+        ring.g = 0.92f;
+        ring.b = 0.75f;
+        ring.angle = (rand() % 628) * 0.01f;
+        ring.rotSpeed = 0.0f;
+        ring.type = 1; // Anillo de choque
+        explosions_.push_back(ring);
+
+        // Sacudida física de cámara según potencia del estallido
+        camShake_ = std::min(1.0f, camShake_ + (maxRadius >= 7.0f ? 0.65f : 0.35f));
+    }
+
+    // Penachos de fuego y humo radiales secundarios para impactos medios y grandes
+    if (maxRadius >= 3.0f) {
+        int extraCount = (maxRadius >= 6.0f) ? 3 : 2;
         for (int k = 0; k < extraCount; ++k) {
             ExplosionFX sub;
-            sub.x = x + (rand() % 20 - 10) * 0.08f * maxRadius;
-            sub.y = y + (rand() % 20 - 10) * 0.08f * maxRadius;
-            sub.z = z + (rand() % 20 - 10) * 0.08f * maxRadius;
-            sub.radius = 0.3f;
-            sub.maxRadius = maxRadius * (0.55f + (rand() % 30) * 0.01f);
-            sub.life = 0.55f + (rand() % 20) * 0.01f;
+            float offsetDist = maxRadius * (0.16f + (rand() % 16) * 0.01f);
+            float offsetAng = (rand() % 628) * 0.01f;
+            sub.x = x + std::cos(offsetAng) * offsetDist;
+            sub.y = y + std::sin(offsetAng) * offsetDist * 0.75f;
+            sub.z = z + (rand() % 20 - 10) * 0.05f * maxRadius;
+            sub.maxRadius = maxRadius * (0.60f + (rand() % 25) * 0.01f);
+            sub.radius = sub.maxRadius * 0.35f;
+            sub.life = 0.40f + (rand() % 20) * 0.01f;
             sub.maxLife = sub.life;
             sub.r = r;
-            sub.g = g * 0.9f;
-            sub.b = b * 0.8f;
+            sub.g = g * 0.95f;
+            sub.b = b * 0.85f;
             sub.angle = (rand() % 628) * 0.01f;
+            sub.rotSpeed = ((rand() % 200) - 100) * 0.025f;
+            sub.type = 0;
             explosions_.push_back(sub);
         }
+    }
 
-        // Chispas y restos incandescentes volando con física y gravedad
-        int debrisCount = (maxRadius >= 5.0f) ? 14 : 7;
+    // Trazadores de esquirlas y restos incandescentes con física y propulsión 3D
+    if (maxRadius >= 2.0f) {
+        int debrisCount = (maxRadius >= 6.0f) ? 16 : 9;
         for (int k = 0; k < debrisCount; ++k) {
             ExplosionDebris deb;
             deb.x = x;
             deb.y = y;
             deb.z = z;
-            float spd = 12.0f + (rand() % 35) * 0.5f;
+            float spd = 16.0f + (rand() % 40) * 0.6f;
             float phi = (rand() % 628) * 0.01f;
             float costheta = (rand() % 200 - 100) * 0.01f;
             float sintheta = std::sqrt(std::max(0.0f, 1.0f - costheta * costheta));
             deb.vx = spd * sintheta * std::cos(phi);
-            deb.vy = std::fabs(spd * sintheta * std::sin(phi)) + 6.0f; // Impulso ascendente
+            deb.vy = std::fabs(spd * sintheta * std::sin(phi)) + 7.0f; // Impulso ascendente enérgico
             deb.vz = spd * costheta;
-            deb.size = 0.15f + (rand() % 15) * 0.01f;
-            deb.life = 0.45f + (rand() % 35) * 0.01f;
+            deb.size = 0.14f + (rand() % 14) * 0.01f;
+            deb.life = 0.40f + (rand() % 30) * 0.01f;
             deb.maxLife = deb.life;
             deb.r = 1.0f;
-            deb.g = 0.65f + (rand() % 35) * 0.01f;
-            deb.b = 0.15f;
+            deb.g = 0.70f + (rand() % 25) * 0.01f;
+            deb.b = 0.20f;
             explosionDebris_.push_back(deb);
         }
     }
@@ -1097,6 +1131,12 @@ void Renderer::renderAircraft() {
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
+    if (planeHitFlashTime_ > 0.0f) {
+        w3dEngine::Color4f(1.0f, 0.40f, 0.40f, 1.0f);
+    } else {
+        w3dEngine::Color4f(1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
     // Modelo 3D del Caza WHISK apuntando hacia adelante (-Z)
     static const float jetVerts[] = {
         // --- 1. Morro / Nariz aerodinámica ---
@@ -1188,6 +1228,7 @@ void Renderer::renderAircraft() {
 
     w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     w3dEngine::Enable(w3dEngine::CullFace);
+    w3dEngine::Color4f(1.0f, 1.0f, 1.0f, 1.0f);
     w3dEngine::PopMatrix();
 }
 
@@ -1783,7 +1824,13 @@ void Renderer::renderProjectiles() {
 }
 
 void Renderer::renderExplosions() {
-    // 1. Explosiones animadas con sprite sheet 2x2
+    float camLagX = planeX_ * 0.38f;
+    float camLagY = planeY_ * 0.40f;
+    float camPosX = camLagX;
+    float camPosY = 1.2f + camLagY;
+    float camPosZ = -2.5f;
+
+    // 1. Explosiones animadas esféricas y anillos de choque
     if (!explosions_.empty()) {
         w3dEngine::Enable(w3dEngine::Blend);
         w3dEngine::Disable(w3dEngine::CullFace);
@@ -1803,28 +1850,60 @@ void Renderer::renderExplosions() {
             w3dEngine::PushMatrix();
             w3dEngine::Translatef(exp.x, exp.y, exp.z);
 
+            // Billboarding esférico preciso orientado directamente hacia la cámara
+            float dx = exp.x - camPosX;
+            float dy = exp.y - camPosY;
+            float dz = exp.z - camPosZ;
+            float yaw = std::atan2(dx, -dz) * 57.2957795f;
+            float horizDist = std::sqrt(dx * dx + dz * dz);
+            float pitch = std::atan2(-dy, horizDist) * 57.2957795f;
+
+            w3dEngine::Rotatef(yaw, 0.0f, 1.0f, 0.0f);
+            w3dEngine::Rotatef(pitch, 1.0f, 0.0f, 0.0f);
+            w3dEngine::Rotatef(exp.angle * 57.2957795f, 0.0f, 0.0f, 1.0f);
+
             float prog = 1.0f - (exp.life / exp.maxLife);
             prog = CLAMP(prog, 0.0f, 1.0f);
 
-            // Determinar cuadrante animado (OpenGL invertido por stb_image)
             float u0, u1, v0, v1;
-            if (prog < 0.22f) {
-                // Cuadrante 0: Destello estelar inicial
-                u0 = 0.005f; u1 = 0.495f; v0 = 0.505f; v1 = 0.995f;
+            float r = exp.r, g = exp.g, b = exp.b, alpha = 1.0f;
+
+            if (exp.type == 1) {
+                // ANILLO DE CHOQUE SUPERSONICO EXPANSIVO (Shockwave Ring)
+                u0 = 0.002f; u1 = 0.498f; v0 = 0.502f; v1 = 0.998f;
                 w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
-            } else if (prog < 0.52f) {
-                // Cuadrante 1: Bola de fuego densa
-                u0 = 0.505f; u1 = 0.995f; v0 = 0.505f; v1 = 0.995f;
-                w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
-            } else if (prog < 0.80f) {
-                // Cuadrante 2: Expansión de humo ardiente
-                u0 = 0.005f; u1 = 0.495f; v0 = 0.005f; v1 = 0.495f;
-                w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+                r = 1.0f; g = 0.92f; b = 0.70f;
+                alpha = (1.0f - prog) * 0.95f;
             } else {
-                // Cuadrante 3: Nube de humo y cenizas disipándose
-                u0 = 0.505f; u1 = 0.995f; v0 = 0.005f; v1 = 0.495f;
-                w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+                // BOLA DE FUEGO VOLUMETRICA MULTI-FASE
+                if (prog < 0.18f) {
+                    // Fase 0: Destello estelar instantáneo de detonación (Frame 0: 100% brillante, CERO retardo)
+                    u0 = 0.002f; u1 = 0.498f; v0 = 0.502f; v1 = 0.998f;
+                    w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+                    r = 1.0f; g = 0.98f; b = 0.90f;
+                    alpha = 1.0f;
+                } else if (prog < 0.48f) {
+                    // Fase 1: Bola de fuego incandescente de alta densidad
+                    u0 = 0.502f; u1 = 0.998f; v0 = 0.502f; v1 = 0.998f;
+                    w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
+                    r = exp.r; g = exp.g; b = exp.b;
+                    alpha = 1.0f;
+                } else if (prog < 0.76f) {
+                    // Fase 2: Humo caliente rodante y brasas incandescentes
+                    u0 = 0.002f; u1 = 0.498f; v0 = 0.002f; v1 = 0.498f;
+                    w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+                    r = exp.r * 0.95f; g = exp.g * 0.85f; b = exp.b * 0.75f;
+                    alpha = 1.0f - ((prog - 0.48f) / 0.35f);
+                } else {
+                    // Fase 3: Nube de humo volumétrica disipándose suavemente
+                    u0 = 0.502f; u1 = 0.998f; v0 = 0.002f; v1 = 0.498f;
+                    w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
+                    r = 0.85f; g = 0.85f; b = 0.85f;
+                    alpha = (1.0f - prog) / 0.24f;
+                }
             }
+
+            alpha = CLAMP(alpha, 0.0f, 1.0f);
 
             if (texFxExplosion_) {
                 float curUVs[] = {
@@ -1834,21 +1913,18 @@ void Renderer::renderExplosions() {
                 w3dEngine::TexCoordPointer2f(0, curUVs);
             }
 
-            float c = std::cos(exp.angle) * exp.radius;
-            float s = std::sin(exp.angle) * exp.radius;
+            float rad = exp.radius;
             float expVerts[] = {
-                -c + s, -s - c, 0.0f,
-                 c + s,  s - c, 0.0f,
-                 c - s,  s + c, 0.0f,
+                -rad, -rad, 0.0f,
+                 rad, -rad, 0.0f,
+                 rad,  rad, 0.0f,
 
-                -c + s, -s - c, 0.0f,
-                 c - s,  s + c, 0.0f,
-                -c - s, -s + c, 0.0f
+                -rad, -rad, 0.0f,
+                 rad,  rad, 0.0f,
+                -rad,  rad, 0.0f
             };
 
-            float alpha = std::sin(prog * 3.14159f);
-            alpha = CLAMP(alpha * 1.25f, 0.0f, 1.0f);
-            w3dEngine::Color4f(exp.r, exp.g, exp.b, alpha);
+            w3dEngine::Color4f(r, g, b, alpha);
             w3dEngine::VertexPointer3f(0, expVerts);
             w3dEngine::DrawTrianglesArray(6);
 
@@ -1863,7 +1939,7 @@ void Renderer::renderExplosions() {
         w3dEngine::Enable(w3dEngine::CullFace);
     }
 
-    // 2. Chispas y restos incandescentes volando con física (Debris)
+    // 2. Trazadores de esquirlas incandescentes volando con física (Debris Streaks)
     if (!explosionDebris_.empty()) {
         w3dEngine::Disable(w3dEngine::Texture2D);
         w3dEngine::Disable(w3dEngine::CullFace);
@@ -1880,29 +1956,56 @@ void Renderer::renderExplosions() {
         dColors.reserve(explosionDebris_.size() * 24);
 
         for (const auto& deb : explosionDebris_) {
-            float s = deb.size;
-            dVerts.insert(dVerts.end(), {
-                deb.x - s, deb.y - s, deb.z,
-                deb.x + s, deb.y - s, deb.z,
-                deb.x + s, deb.y + s, deb.z,
+            float lifePct = CLAMP(deb.life / deb.maxLife, 0.0f, 1.0f);
+            float trailDt = std::min(0.045f, (deb.maxLife - deb.life) * 0.7f);
 
-                deb.x - s, deb.y - s, deb.z,
-                deb.x + s, deb.y + s, deb.z,
-                deb.x - s, deb.y + s, deb.z
-            });
-            float a = CLAMP(deb.life / deb.maxLife, 0.0f, 1.0f);
-            unsigned char r = static_cast<unsigned char>(deb.r * 255.0f);
-            unsigned char g = static_cast<unsigned char>(deb.g * 255.0f);
-            unsigned char b = static_cast<unsigned char>(deb.b * 255.0f);
-            unsigned char alpha = static_cast<unsigned char>(a * 255.0f);
-            for (int k = 0; k < 6; ++k) {
-                dColors.insert(dColors.end(), { r, g, b, alpha });
+            float hx = deb.x;
+            float hy = deb.y;
+            float hz = deb.z;
+
+            float tx = deb.x - deb.vx * trailDt;
+            float ty = deb.y - deb.vy * trailDt;
+            float tz = deb.z - deb.vz * trailDt;
+
+            float vx = deb.vx;
+            float vy = deb.vy;
+            float len = std::hypot(vx, vy);
+            float px = 0.04f;
+            float py = 0.04f;
+            if (len > 0.01f) {
+                px = (-vy / len) * deb.size * 0.45f;
+                py = ( vx / len) * deb.size * 0.45f;
             }
+
+            dVerts.insert(dVerts.end(), {
+                tx - px, ty - py, tz,
+                tx + px, ty + py, tz,
+                hx + px, hy + py, hz,
+
+                tx - px, ty - py, tz,
+                hx + px, hy + py, hz,
+                hx - px, hy - py, hz
+            });
+
+            unsigned char headAlpha = static_cast<unsigned char>(lifePct * 255.0f);
+            unsigned char tailAlpha = static_cast<unsigned char>(lifePct * 30.0f);
+
+            unsigned char rH = 255, gH = 240, bH = 190;
+            unsigned char rT = 255, gT = 110, bT = 20;
+
+            dColors.insert(dColors.end(), { rT, gT, bT, tailAlpha });
+            dColors.insert(dColors.end(), { rT, gT, bT, tailAlpha });
+            dColors.insert(dColors.end(), { rH, gH, bH, headAlpha });
+
+            dColors.insert(dColors.end(), { rT, gT, bT, tailAlpha });
+            dColors.insert(dColors.end(), { rH, gH, bH, headAlpha });
+            dColors.insert(dColors.end(), { rH, gH, bH, headAlpha });
         }
 
         w3dEngine::VertexPointer3f(0, dVerts.data());
         w3dEngine::ColorPointer4ub(dColors.data());
         w3dEngine::DrawTrianglesArray(static_cast<int>(dVerts.size() / 3));
+
         w3dEngine::DisableArray(w3dEngine::ColorArray);
         w3dEngine::DepthMask(true);
         w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
@@ -2606,6 +2709,12 @@ void Renderer::renderGameUI() {
     if (texBtnSound_) {
         renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.35f);
     }
+
+    // 8. Flash de impacto / daño en la cabina (Vignette roja reactiva instantánea)
+    if (planeHitFlashTime_ > 0.0f) {
+        float flashAlpha = (planeHitFlashTime_ / 0.20f) * 0.22f;
+        renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 1.0f, 0.05f, 0.05f, flashAlpha);
+    }
 }
 
 void Renderer::renderWhisk3D() {
@@ -3109,7 +3218,9 @@ void Renderer::renderWhisk3D() {
 
             if (hit) {
                 healthPct_ -= 0.12f;
-                spawnExplosion(it->x, it->y, it->z, 1.8f, 1.0f, 0.45f, 0.15f);
+                planeHitFlashTime_ = 0.20f;
+                camShake_ = std::min(1.0f, camShake_ + 0.35f);
+                spawnExplosion(it->x, it->y, it->z, 0.85f, 1.0f, 0.80f, 0.35f);
                 it = enemyBullets_.erase(it);
                 if (healthPct_ <= 0.0f) {
                     healthPct_ = 0.0f;
@@ -3126,10 +3237,21 @@ void Renderer::renderWhisk3D() {
             }
         }
 
-        // Actualizar animaciones de explosiones
+        // Actualizar animaciones de explosiones con expansión determinista y rotación
         for (auto it = explosions_.begin(); it != explosions_.end(); ) {
             it->life -= dt;
-            it->radius += (it->maxRadius - it->radius) * 0.16f;
+            it->angle += it->rotSpeed * dt;
+            float prog = 1.0f - (it->life / it->maxLife);
+            prog = CLAMP(prog, 0.0f, 1.0f);
+            if (it->type == 1) {
+                // Anillo de choque: rápida expansión supersónica
+                it->radius = it->maxRadius * (0.25f + 0.75f * prog);
+            } else {
+                // Bola de fuego: expansión explosiva inicial inmediata (CERO retardo)
+                float expandCurve = 1.0f - std::pow(1.0f - prog, 2.5f);
+                it->radius = it->maxRadius * (0.45f + 0.55f * expandCurve);
+            }
+
             if (it->life <= 0.0f) {
                 it = explosions_.erase(it);
             } else {
@@ -3137,7 +3259,7 @@ void Renderer::renderWhisk3D() {
             }
         }
 
-        // Actualizar chispas de escombros de explosiones
+        // Actualizar trazadores de esquirlas incandescentes
         for (auto it = explosionDebris_.begin(); it != explosionDebris_.end(); ) {
             it->x += it->vx * dt;
             it->y += it->vy * dt;
@@ -3151,6 +3273,15 @@ void Renderer::renderWhisk3D() {
             } else {
                 ++it;
             }
+        }
+
+        if (planeHitFlashTime_ > 0.0f) {
+            planeHitFlashTime_ -= dt;
+            if (planeHitFlashTime_ < 0.0f) planeHitFlashTime_ = 0.0f;
+        }
+        if (camShake_ > 0.0f) {
+            camShake_ -= dt * 3.5f;
+            if (camShake_ < 0.0f) camShake_ = 0.0f;
         }
 
         W3dFisicaPaso(1.0f / 60.0f);
@@ -3172,6 +3303,12 @@ void Renderer::renderWhisk3D() {
     float camLagX = planeX_ * 0.38f;
     float camLagY = planeY_ * 0.40f;
     float camBank = planeRoll_ * 0.14f;
+
+    if (camShake_ > 0.001f) {
+        float shakeMag = camShake_ * 0.16f;
+        camLagX += ((rand() % 200 - 100) * 0.01f) * shakeMag;
+        camLagY += ((rand() % 200 - 100) * 0.01f) * shakeMag;
+    }
 
     w3dEngine::MatrixMode(w3dEngine::ModelView);
     w3dEngine::LoadIdentity();

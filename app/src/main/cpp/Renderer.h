@@ -103,6 +103,8 @@ private:
     float speedKnots_;
     float altitudeFeet_;
     float healthPct_;
+    float planeHitFlashTime_;
+    float camShake_;
     int missileCount_;
     int enemiesDestroyed_;
 
@@ -236,6 +238,8 @@ private:
         float maxLife;
         float r, g, b;
         float angle;
+        float rotSpeed;
+        int type; // 0: Fireball, 1: Shockwave Ring
     };
     std::vector<ExplosionFX> explosions_;
 
