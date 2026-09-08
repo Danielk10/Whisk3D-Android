@@ -662,7 +662,7 @@ void Renderer::renderSkyAndOcean() {
     // 2. Océano tropical subdividido con oleaje dinámico
     if (texSea_) {
         w3dEngine::Disable(w3dEngine::CullFace);
-        float waveShift = timeSec_ * 0.18f;
+        float waveShift = std::fmod(timeSec_ * 0.69f, 22.0f);
         const int gridX = 14;
         const int gridZ = 16;
         const float minX = -320.0f, maxX = 320.0f;
@@ -678,8 +678,8 @@ void Renderer::renderSkyAndOcean() {
         for (int j = 0; j < gridZ; ++j) {
             float z0 = minZ + j * stepZ;
             float z1 = z0 + stepZ;
-            float v0 = (float)j / gridZ * 22.0f + waveShift;
-            float v1 = (float)(j + 1) / gridZ * 22.0f + waveShift;
+            float v0 = (float)j / gridZ * 22.0f - waveShift;
+            float v1 = (float)(j + 1) / gridZ * 22.0f - waveShift;
 
             for (int i = 0; i < gridX; ++i) {
                 float x0 = minX + i * stepX;
