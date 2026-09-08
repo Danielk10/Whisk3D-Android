@@ -68,6 +68,7 @@ private:
     void renderHUDBar(float x, float y, float w, float h, float fillPct, float r, float g, float b, float a);
     void renderHUDRect(float x, float y, float w, float h, float r, float g, float b, float a);
     void renderHUDLine(float x0, float y0, float x1, float y1, float r, float g, float b, float a, float width = 2.0f);
+    bool projectWorldToScreen(float wx, float wy, float wz, float &outSx, float &outSy) const;
 
     android_app *app_;
     EGLDisplay display_;
@@ -118,6 +119,7 @@ private:
     int stickPointerId_;
     int firePointerId_;
     int missilePointerId_;
+    int bombPointerId_;
     bool touchDown_;
     float touchX_;
     float touchY_;
@@ -130,11 +132,15 @@ private:
     float stickDeflectY_;
     bool firePressed_;
     bool missilePressed_;
+    bool bombPressed_;
     float cannonCooldown_;
     float muzzleFlashTime_;
     float missileFlightTime_;
+    float missileCooldown_;
     int missileTargetMode_; // 0: Warship, 1: Enemy Jet
     int missileTargetIdx_;
+    int bombCount_;
+    float bombCooldown_;
 
     struct Bullet {
         float x, y, z;
@@ -142,6 +148,36 @@ private:
         float life;
     };
     std::vector<Bullet> bullets_;
+
+    struct PlayerMissile {
+        float x, y, z;
+        float vx, vy, vz;
+        float pitch, yaw;
+        int targetMode;
+        int targetIdx;
+        float life;
+        bool active;
+    };
+    std::vector<PlayerMissile> activeMissiles_;
+
+    struct Bomb {
+        float x, y, z;
+        float vx, vy, vz;
+        float pitch;
+        float life;
+        bool active;
+    };
+    std::vector<Bomb> bombs_;
+
+    struct SmokeParticle {
+        float x, y, z;
+        float vx, vy, vz;
+        float size;
+        float life;
+        float maxLife;
+        float r, g, b, a;
+    };
+    std::vector<SmokeParticle> missileSmoke_;
 
     struct EnemyBullet {
         float x, y, z;
@@ -161,6 +197,9 @@ private:
         bool active;
         int type;
         float flightTimer;
+        float baseX;
+        float targetApproachY;
+        bool breakingAway;
     };
     std::vector<EnemyJet> enemyJets_;
 
@@ -218,6 +257,7 @@ private:
     std::shared_ptr<TextureAsset> texHudRadar_;
     std::shared_ptr<TextureAsset> texBtnFire_;
     std::shared_ptr<TextureAsset> texBtnMissile_;
+    std::shared_ptr<TextureAsset> texBtnBomb_;
     std::shared_ptr<TextureAsset> texBtnStick_;
     std::shared_ptr<TextureAsset> texBtnStickBase_;
     std::shared_ptr<TextureAsset> texBtnStickKnob_;
