@@ -277,6 +277,8 @@ void Renderer::loadGameTextures() {
     texBtnFire_      = TextureAsset::loadAsset(assetMgr, "textures/btn_fire.png");
     texBtnMissile_   = TextureAsset::loadAsset(assetMgr, "textures/btn_missile.png");
     texBtnStick_     = TextureAsset::loadAsset(assetMgr, "textures/btn_stick.png");
+    texBtnStickBase_ = TextureAsset::loadAsset(assetMgr, "textures/btn_stick_base.png");
+    texBtnStickKnob_ = TextureAsset::loadAsset(assetMgr, "textures/btn_stick_knob.png");
     texBtnSound_     = TextureAsset::loadAsset(assetMgr, "textures/btn_sound.png");
 
     // Menu UI Textures
@@ -545,8 +547,8 @@ void Renderer::handleInput() {
                     continue;
                 }
 
-                // Joystick Virtual de Navegación (en la mitad izquierda o pantalla)
-                if (stickPointerId_ == -1) {
+                // Joystick Virtual de Navegación (en la mitad inferior izquierda de la pantalla)
+                if (stickPointerId_ == -1 && px < (float)width_ * 0.52f && py > (float)height_ * 0.38f) {
                     stickPointerId_ = pId;
                     stickActive_ = true;
                     stickOriginX_ = px;
@@ -627,15 +629,15 @@ void Renderer::handleInput() {
 // ----------------------------------------------------------------------------
 
 void Renderer::renderSkyAndOcean() {
-    // 1. Cielo atmosférico tropical con gradiente radiante
+    // 1. Cielo atmosférico tropical con gradiente radiante completo
     static const float skyVerts[] = {
-        -260.0f,  95.0f, -250.0f,
-         260.0f,  95.0f, -250.0f,
-         260.0f,  -8.0f, -250.0f,
+        -360.0f,  220.0f, -250.0f,
+         360.0f,  220.0f, -250.0f,
+         360.0f,  -25.0f, -250.0f,
 
-        -260.0f,  95.0f, -250.0f,
-         260.0f,  -8.0f, -250.0f,
-        -260.0f,  -8.0f, -250.0f
+        -360.0f,  220.0f, -250.0f,
+         360.0f,  -25.0f, -250.0f,
+        -360.0f,  -25.0f, -250.0f
     };
     static const unsigned char skyColors[] = {
         18,  70, 160, 255,   // Azul zénit profundo
@@ -647,6 +649,7 @@ void Renderer::renderSkyAndOcean() {
     };
 
     w3dEngine::Disable(w3dEngine::Texture2D);
+    w3dEngine::Disable(w3dEngine::CullFace);
     w3dEngine::Enable(w3dEngine::ColorMaterial);
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::ColorArray);
@@ -654,14 +657,16 @@ void Renderer::renderSkyAndOcean() {
     w3dEngine::ColorPointer4ub(skyColors);
     w3dEngine::DrawTrianglesArray(6);
     w3dEngine::DisableArray(w3dEngine::ColorArray);
+    w3dEngine::Disable(w3dEngine::ColorMaterial);
 
-    // 2. Océano tropical subdividido con oleaje y reflejos
+    // 2. Océano tropical subdividido con oleaje dinámico
     if (texSea_) {
-        float waveShift = timeSec_ * 0.20f;
-        const int gridX = 10;
-        const int gridZ = 12;
-        const float minX = -190.0f, maxX = 190.0f;
-        const float minZ = -260.0f, maxZ = 40.0f;
+        w3dEngine::Disable(w3dEngine::CullFace);
+        float waveShift = timeSec_ * 0.18f;
+        const int gridX = 14;
+        const int gridZ = 16;
+        const float minX = -320.0f, maxX = 320.0f;
+        const float minZ = -450.0f, maxZ = 60.0f;
         const float stepX = (maxX - minX) / gridX;
         const float stepZ = (maxZ - minZ) / gridZ;
 
@@ -673,32 +678,33 @@ void Renderer::renderSkyAndOcean() {
         for (int j = 0; j < gridZ; ++j) {
             float z0 = minZ + j * stepZ;
             float z1 = z0 + stepZ;
-            float v0 = (float)j / gridZ * 20.0f + waveShift;
-            float v1 = (float)(j + 1) / gridZ * 20.0f + waveShift;
+            float v0 = (float)j / gridZ * 22.0f + waveShift;
+            float v1 = (float)(j + 1) / gridZ * 22.0f + waveShift;
 
             for (int i = 0; i < gridX; ++i) {
                 float x0 = minX + i * stepX;
                 float x1 = x0 + stepX;
-                float u0 = (float)i / gridX * 16.0f;
-                float u1 = (float)(i + 1) / gridX * 16.0f;
+                float u0 = (float)i / gridX * 20.0f;
+                float u1 = (float)(i + 1) / gridX * 20.0f;
 
+                // Triángulos CCW vistos desde arriba (Y > -2.5f)
                 oceanVerts.insert(oceanVerts.end(), {
                     x0, -2.5f, z0,
-                    x1, -2.5f, z0,
+                    x0, -2.5f, z1,
                     x1, -2.5f, z1,
 
                     x0, -2.5f, z0,
                     x1, -2.5f, z1,
-                    x0, -2.5f, z1
+                    x1, -2.5f, z0
                 });
                 oceanUVs.insert(oceanUVs.end(), {
                     u0, v0,
-                    u1, v0,
+                    u0, v1,
                     u1, v1,
 
                     u0, v0,
                     u1, v1,
-                    u0, v1
+                    u1, v0
                 });
             }
         }
@@ -712,19 +718,21 @@ void Renderer::renderSkyAndOcean() {
         w3dEngine::TexCoordPointer2f(0, oceanUVs.data());
         w3dEngine::DrawTrianglesArray(static_cast<int>(oceanVerts.size() / 3));
         w3dEngine::DisableArray(w3dEngine::TexCoordArray);
+        w3dEngine::Enable(w3dEngine::CullFace);
     }
 }
 
 void Renderer::renderSun() {
-    // Sol radiante en el cuadrante superior derecho del cielo (igual al logo)
+    // Sol radiante en el cuadrante superior derecho del cielo
     w3dEngine::PushMatrix();
-    w3dEngine::Translatef(36.0f, 48.0f, -145.0f);
+    w3dEngine::Translatef(36.0f, 52.0f, -145.0f);
 
     w3dEngine::Enable(w3dEngine::Blend);
-    w3dEngine::SetMezcla(w3dEngine::MezclaAdd);
+    w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
     w3dEngine::Disable(w3dEngine::CullFace);
+    w3dEngine::DepthMask(false);
 
-    float sunSize = 42.0f;
+    float sunSize = 44.0f;
     float sunVerts[] = {
         -sunSize, -sunSize, 0.0f,
          sunSize, -sunSize, 0.0f,
@@ -751,6 +759,7 @@ void Renderer::renderSun() {
         w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     }
 
+    w3dEngine::DepthMask(true);
     w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
     w3dEngine::Enable(w3dEngine::CullFace);
     w3dEngine::PopMatrix();
@@ -764,6 +773,7 @@ void Renderer::renderClouds() {
     w3dEngine::Enable(w3dEngine::Blend);
     w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
     w3dEngine::Disable(w3dEngine::CullFace);
+    w3dEngine::DepthMask(false);
     w3dEngine::EnableArray(w3dEngine::VertexArray);
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
@@ -795,6 +805,7 @@ void Renderer::renderClouds() {
         w3dEngine::PopMatrix();
     }
 
+    w3dEngine::DepthMask(true);
     w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     w3dEngine::Enable(w3dEngine::CullFace);
 }
@@ -952,36 +963,36 @@ void Renderer::renderAircraft() {
     };
 
     static const float jetUVs[] = {
-        // Morro superior
-        0.75f, 0.95f,  0.60f, 0.65f,  0.75f, 0.65f,
-        0.75f, 0.95f,  0.75f, 0.65f,  0.90f, 0.65f,
-        // Morro inferior
-        0.25f, 0.45f,  0.10f, 0.15f,  0.25f, 0.15f,
-        0.25f, 0.45f,  0.40f, 0.15f,  0.25f, 0.15f,
+        // Morro superior (piel blanca aeronáutica elegante)
+        0.60f, 0.96f,  0.54f, 0.80f,  0.60f, 0.80f,
+        0.60f, 0.96f,  0.60f, 0.80f,  0.66f, 0.80f,
+        // Morro inferior (panel ventral oscuro)
+        0.25f, 0.45f,  0.25f, 0.10f,  0.10f, 0.10f,
+        0.25f, 0.45f,  0.40f, 0.10f,  0.25f, 0.10f,
 
-        // Cabina
-        0.25f, 0.60f,  0.08f, 0.75f,  0.25f, 0.92f,
-        0.25f, 0.60f,  0.25f, 0.92f,  0.42f, 0.75f,
-        0.25f, 0.92f,  0.08f, 0.75f,  0.25f, 0.70f,
-        0.25f, 0.92f,  0.25f, 0.70f,  0.42f, 0.75f,
+        // Cabina (Cúpula de cristal azul con reflejos blancos)
+        0.25f, 0.95f,  0.06f, 0.75f,  0.25f, 0.75f,
+        0.25f, 0.95f,  0.25f, 0.75f,  0.44f, 0.75f,
+        0.25f, 0.75f,  0.06f, 0.75f,  0.25f, 0.55f,
+        0.25f, 0.75f,  0.25f, 0.55f,  0.44f, 0.75f,
 
-        // Fuselaje
-        0.60f, 0.90f,  0.60f, 0.55f,  0.90f, 0.55f,
-        0.60f, 0.90f,  0.90f, 0.55f,  0.90f, 0.90f,
+        // Fuselaje dorsal (Escarapela de Estrella de Combate) y vientre
+        0.52f, 0.73f,  0.52f, 0.61f,  0.69f, 0.61f,
+        0.52f, 0.73f,  0.69f, 0.61f,  0.69f, 0.73f,
         0.10f, 0.45f,  0.40f, 0.10f,  0.10f, 0.10f,
         0.10f, 0.45f,  0.40f, 0.45f,  0.40f, 0.10f,
 
-        // Alas Superiores e Inferiores
-        0.60f, 0.60f,  0.95f, 0.95f,  0.95f, 0.60f,
-        0.10f, 0.10f,  0.45f, 0.45f,  0.45f, 0.10f,
-        0.60f, 0.60f,  0.95f, 0.60f,  0.95f, 0.95f,
-        0.10f, 0.10f,  0.45f, 0.10f,  0.45f, 0.45f,
+        // Alas Delta (Franjas aerodinámicas de velocidad naranja/rojas)
+        0.58f, 0.95f,  0.95f, 0.55f,  0.75f, 0.55f,
+        0.10f, 0.45f,  0.40f, 0.45f,  0.25f, 0.10f,
+        0.58f, 0.95f,  0.75f, 0.55f,  0.95f, 0.55f,
+        0.10f, 0.45f,  0.25f, 0.10f,  0.40f, 0.45f,
 
-        // Colas
-        0.65f, 0.60f,  0.88f, 0.95f,  0.88f, 0.60f,
-        0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
-        0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
-        0.65f, 0.60f,  0.88f, 0.88f,  0.88f, 0.60f
+        // Estabilizadores Verticales Dobles (Insignia "W WHISK" visible y erguida)
+        0.77f, 0.77f,  0.96f, 0.96f,  0.96f, 0.77f,
+        0.77f, 0.77f,  0.96f, 0.77f,  0.96f, 0.96f,
+        0.77f, 0.77f,  0.96f, 0.77f,  0.96f, 0.96f,
+        0.77f, 0.77f,  0.96f, 0.96f,  0.96f, 0.77f
     };
 
     w3dEngine::Color4f(1.0f, 1.0f, 1.0f, 1.0f);
@@ -1054,26 +1065,36 @@ void Renderer::renderEnemyJets() {
     };
 
     static const float ejUVs[] = {
-        0.75f, 0.95f,  0.60f, 0.65f,  0.75f, 0.65f,
-        0.75f, 0.95f,  0.75f, 0.65f,  0.90f, 0.65f,
-        0.25f, 0.45f,  0.10f, 0.15f,  0.25f, 0.15f,
-        0.25f, 0.45f,  0.40f, 0.15f,  0.25f, 0.15f,
-        0.25f, 0.60f,  0.08f, 0.75f,  0.25f, 0.92f,
-        0.25f, 0.60f,  0.25f, 0.92f,  0.42f, 0.75f,
-        0.25f, 0.92f,  0.08f, 0.75f,  0.25f, 0.70f,
-        0.25f, 0.92f,  0.25f, 0.70f,  0.42f, 0.75f,
-        0.60f, 0.90f,  0.60f, 0.55f,  0.90f, 0.55f,
-        0.60f, 0.90f,  0.90f, 0.55f,  0.90f, 0.90f,
+        // Morro superior
+        0.60f, 0.96f,  0.54f, 0.80f,  0.60f, 0.80f,
+        0.60f, 0.96f,  0.60f, 0.80f,  0.66f, 0.80f,
+        // Morro inferior
+        0.25f, 0.45f,  0.25f, 0.10f,  0.10f, 0.10f,
+        0.25f, 0.45f,  0.40f, 0.10f,  0.25f, 0.10f,
+
+        // Cabina (Cúpula roja táctica)
+        0.25f, 0.95f,  0.06f, 0.75f,  0.25f, 0.75f,
+        0.25f, 0.95f,  0.25f, 0.75f,  0.44f, 0.75f,
+        0.25f, 0.75f,  0.06f, 0.75f,  0.25f, 0.55f,
+        0.25f, 0.75f,  0.25f, 0.55f,  0.44f, 0.75f,
+
+        // Fuselaje e insignia de intercepción
+        0.55f, 0.88f,  0.55f, 0.60f,  0.88f, 0.60f,
+        0.55f, 0.88f,  0.88f, 0.60f,  0.88f, 0.88f,
         0.10f, 0.45f,  0.40f, 0.10f,  0.10f, 0.10f,
         0.10f, 0.45f,  0.40f, 0.45f,  0.40f, 0.10f,
-        0.60f, 0.60f,  0.95f, 0.95f,  0.95f, 0.60f,
-        0.10f, 0.10f,  0.45f, 0.45f,  0.45f, 0.10f,
-        0.60f, 0.60f,  0.95f, 0.60f,  0.95f, 0.95f,
-        0.10f, 0.10f,  0.45f, 0.10f,  0.45f, 0.45f,
-        0.65f, 0.60f,  0.88f, 0.95f,  0.88f, 0.60f,
-        0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
-        0.65f, 0.60f,  0.88f, 0.60f,  0.88f, 0.95f,
-        0.65f, 0.60f,  0.88f, 0.88f,  0.88f, 0.60f
+
+        // Alas Delta
+        0.58f, 0.95f,  0.95f, 0.55f,  0.75f, 0.55f,
+        0.10f, 0.45f,  0.40f, 0.45f,  0.25f, 0.10f,
+        0.58f, 0.95f,  0.75f, 0.55f,  0.95f, 0.55f,
+        0.10f, 0.45f,  0.25f, 0.10f,  0.40f, 0.45f,
+
+        // Estabilizadores dobles
+        0.75f, 0.65f,  0.95f, 0.95f,  0.95f, 0.65f,
+        0.75f, 0.65f,  0.95f, 0.65f,  0.95f, 0.95f,
+        0.75f, 0.65f,  0.95f, 0.65f,  0.95f, 0.95f,
+        0.75f, 0.65f,  0.95f, 0.95f,  0.95f, 0.65f
     };
 
     for (const auto &ej : enemyJets_) {
@@ -1152,29 +1173,43 @@ void Renderer::renderTarget() {
     };
 
     static const float shipUVs[] = {
-        0.10f, 0.95f,   0.05f, 0.60f,   0.45f, 0.60f,
-        0.55f, 0.95f,   0.55f, 0.60f,   0.95f, 0.60f,
-        0.55f, 0.95f,   0.95f, 0.60f,   0.95f, 0.95f,
-        0.10f, 0.45f,   0.45f, 0.45f,   0.45f, 0.05f,
-        0.10f, 0.45f,   0.45f, 0.05f,   0.10f, 0.05f,
-        0.45f, 0.45f,   0.85f, 0.45f,   0.85f, 0.05f,
-        0.45f, 0.45f,   0.85f, 0.05f,   0.45f, 0.05f,
-        0.10f, 0.45f,   0.10f, 0.05f,   0.85f, 0.05f,
-        0.10f, 0.45f,   0.85f, 0.05f,   0.85f, 0.45f,
-        0.10f, 0.45f,   0.85f, 0.45f,   0.85f, 0.05f,
-        0.10f, 0.45f,   0.85f, 0.05f,   0.10f, 0.45f,
-        0.25f, 0.45f,   0.75f, 0.45f,   0.75f, 0.05f,
-        0.25f, 0.45f,   0.75f, 0.05f,   0.25f, 0.05f,
-        0.25f, 0.65f,   0.75f, 0.65f,   0.75f, 0.85f,
-        0.25f, 0.65f,   0.75f, 0.85f,   0.25f, 0.85f,
-        0.20f, 0.45f,   0.80f, 0.25f,   0.80f, 0.45f,
-        0.20f, 0.45f,   0.20f, 0.25f,   0.80f, 0.25f,
-        0.20f, 0.45f,   0.60f, 0.45f,   0.60f, 0.25f,
-        0.20f, 0.45f,   0.60f, 0.25f,   0.20f, 0.25f,
-        0.20f, 0.45f,   0.60f, 0.25f,   0.60f, 0.45f,
-        0.20f, 0.45f,   0.20f, 0.25f,   0.60f, 0.25f,
-        0.30f, 0.45f,   0.70f, 0.45f,   0.70f, 0.25f,
-        0.30f, 0.45f,   0.70f, 0.25f,   0.30f, 0.25f
+        // 1. Cubierta de proa (VLS y lanzador)
+        0.25f, 0.95f,   0.05f, 0.55f,   0.45f, 0.55f,
+        // Cubierta de popa (Helipuerto con insignia "H")
+        0.55f, 0.95f,   0.55f, 0.55f,   0.95f, 0.55f,
+        0.55f, 0.95f,   0.95f, 0.55f,   0.95f, 0.95f,
+
+        // 2. Proa de babor
+        0.45f, 0.35f,   0.05f, 0.35f,   0.05f, 0.05f,
+        0.45f, 0.35f,   0.05f, 0.05f,   0.45f, 0.05f,
+        // Proa de estribor
+        0.55f, 0.35f,   0.95f, 0.35f,   0.95f, 0.05f,
+        0.55f, 0.35f,   0.95f, 0.05f,   0.55f, 0.05f,
+        // Costado babor con código "DDG-88" y flotación
+        0.05f, 0.35f,   0.05f, 0.05f,   0.48f, 0.35f,
+        0.05f, 0.05f,   0.48f, 0.05f,   0.48f, 0.35f,
+        // Costado estribor con código "AEGIS" y flotación
+        0.52f, 0.35f,   0.95f, 0.35f,   0.52f, 0.05f,
+        0.95f, 0.35f,   0.95f, 0.05f,   0.52f, 0.05f,
+        // Espejo de popa
+        0.10f, 0.35f,   0.10f, 0.05f,   0.40f, 0.35f,
+        0.40f, 0.35f,   0.10f, 0.05f,   0.40f, 0.05f,
+
+        // 3. Superestructura y Puente de Mando (Techo y Ventanas Radar)
+        0.15f, 0.85f,   0.45f, 0.85f,   0.45f, 0.65f,
+        0.15f, 0.85f,   0.45f, 0.65f,   0.15f, 0.65f,
+        // Frontal del puente (ventanales cian/verde)
+        0.10f, 0.36f,   0.90f, 0.36f,   0.90f, 0.48f,
+        0.10f, 0.36f,   0.90f, 0.48f,   0.10f, 0.48f,
+        // Lateral babor del puente
+        0.90f, 0.36f,   0.10f, 0.48f,   0.10f, 0.36f,
+        0.90f, 0.36f,   0.90f, 0.48f,   0.10f, 0.48f,
+        // Lateral estribor del puente
+        0.10f, 0.36f,   0.10f, 0.48f,   0.90f, 0.36f,
+        0.10f, 0.48f,   0.90f, 0.48f,   0.90f, 0.36f,
+        // Popa del puente
+        0.10f, 0.36f,   0.90f, 0.36f,   0.90f, 0.48f,
+        0.10f, 0.36f,   0.90f, 0.48f,   0.10f, 0.48f
     };
 
     w3dEngine::VertexPointer3f(0, shipVerts);
@@ -1326,8 +1361,9 @@ void Renderer::renderExplosions() {
     if (explosions_.empty()) return;
 
     w3dEngine::Enable(w3dEngine::Blend);
-    w3dEngine::SetMezcla(w3dEngine::MezclaAdd);
+    w3dEngine::SetMezcla(w3dEngine::MezclaAddAlpha);
     w3dEngine::Disable(w3dEngine::CullFace);
+    w3dEngine::DepthMask(false);
     w3dEngine::EnableArray(w3dEngine::VertexArray);
 
     if (texFxExplosion_) {
@@ -1365,8 +1401,9 @@ void Renderer::renderExplosions() {
     if (texFxExplosion_) {
         w3dEngine::DisableArray(w3dEngine::TexCoordArray);
     }
+    w3dEngine::DepthMask(true);
     w3dEngine::SetMezcla(w3dEngine::MezclaAlpha);
-    w3dEngine::Disable(w3dEngine::CullFace);
+    w3dEngine::Enable(w3dEngine::CullFace);
 }
 
 // ----------------------------------------------------------------------------
@@ -1486,7 +1523,7 @@ void Renderer::renderHUDLine(float x0, float y0, float x1, float y1, float r, fl
 
 void Renderer::renderDigits(float x, float y, float charW, float charH, const std::string& text) {
     if (!texHudDigits_) return;
-    static const std::string charset = "0123456789:/-XKTSPREC ";
+    static const std::string charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ:/-.!?[]%+# ";
     float totalChars = static_cast<float>(charset.size());
 
     w3dEngine::Disable(w3dEngine::CullFace);
@@ -1500,14 +1537,15 @@ void Renderer::renderDigits(float x, float y, float charW, float charH, const st
     w3dEngine::EnableArray(w3dEngine::TexCoordArray);
 
     float curX = x;
-    for (char c : text) {
+    for (char rawC : text) {
+        char c = (char)std::toupper((unsigned char)rawC);
         if (c == ' ') {
-            curX += charW * 0.6f;
+            curX += charW * 0.50f;
             continue;
         }
         auto pos = charset.find(c);
         if (pos == std::string::npos) {
-            curX += charW;
+            curX += charW * 0.50f;
             continue;
         }
         float u0 = static_cast<float>(pos) / totalChars;
@@ -1536,7 +1574,7 @@ void Renderer::renderDigits(float x, float y, float charW, float charH, const st
         w3dEngine::TexCoordPointer2f(0, qUVs);
         w3dEngine::DrawTrianglesArray(6);
 
-        curX += charW * 0.85f;
+        curX += charW * 0.78f;
     }
     w3dEngine::DisableArray(w3dEngine::TexCoordArray);
 }
@@ -1555,106 +1593,112 @@ void Renderer::renderMainMenuUI() {
     w3dEngine::LoadIdentity();
 
     // 1. Sombra cinemática suave para destacar el menú sobre el cielo y mar 3D
-    renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.02f, 0.06f, 0.12f, 0.45f);
+    renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.02f, 0.06f, 0.12f, 0.40f);
 
     // 2. Título Principal (WHISK 3D)
-    float titleW = std::min(width_ * 0.88f, 440.0f);
+    float titleW = std::min((float)width_ * 0.90f, 420.0f);
     float titleH = titleW * (160.0f / 512.0f);
-    float tx = (width_ - titleW) * 0.5f;
-    float ty = height_ * 0.14f;
+    float tx = ((float)width_ - titleW) * 0.5f;
+    float ty = (float)height_ * 0.12f;
 
     // Placa de cabina con bisel de neón cian
-    renderHUDRect(tx - 12.0f, ty - 8.0f, titleW + 24.0f, titleH + 16.0f, 0.04f, 0.12f, 0.22f, 0.75f);
-    renderHUDLine(tx - 12.0f, ty - 8.0f, tx + titleW + 12.0f, ty - 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
-    renderHUDLine(tx - 12.0f, ty + titleH + 8.0f, tx + titleW + 12.0f, ty + titleH + 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
-    renderHUDLine(tx - 12.0f, ty - 8.0f, tx - 12.0f, ty + titleH + 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
-    renderHUDLine(tx + titleW + 12.0f, ty - 8.0f, tx + titleW + 12.0f, ty + titleH + 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
+    renderHUDRect(tx - 8.0f, ty - 8.0f, titleW + 16.0f, titleH + 16.0f, 0.03f, 0.10f, 0.20f, 0.80f);
+    renderHUDLine(tx - 8.0f, ty - 8.0f, tx + titleW + 8.0f, ty - 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
+    renderHUDLine(tx - 8.0f, ty + titleH + 8.0f, tx + titleW + 8.0f, ty + titleH + 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
+    renderHUDLine(tx - 8.0f, ty - 8.0f, tx - 8.0f, ty + titleH + 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
+    renderHUDLine(tx + titleW + 8.0f, ty - 8.0f, tx + titleW + 8.0f, ty + titleH + 8.0f, 0.0f, 0.85f, 1.0f, 0.90f, 2.0f);
 
     if (texMenuTitle_) {
         renderHUDQuad(tx, ty, titleW, titleH, texMenuTitle_->getTextureID(), 1.0f);
     } else {
-        renderDigits(tx + 24.0f, ty + 12.0f, 22.0f, 32.0f, "WHISK 3D");
+        renderDigits(tx + 20.0f, ty + 15.0f, 24.0f, 32.0f, "WHISK 3D");
     }
 
     // 3. Botón JUGAR / DESPEGAR (Pulsante e interactivo)
-    float pulse = 0.94f + 0.06f * std::sin(timeSec_ * 5.0f);
-    float btnW = std::min(width_ * 0.80f, 330.0f) * pulse;
-    float btnH = 76.0f * pulse;
-    float bx = (width_ - btnW) * 0.5f;
-    float by = height_ * 0.52f;
+    float pulse = 0.96f + 0.04f * std::sin(timeSec_ * 5.0f);
+    float btnW = std::min((float)width_ * 0.82f, 320.0f) * pulse;
+    float btnH = 68.0f * pulse;
+    float bx = ((float)width_ - btnW) * 0.5f;
+    float by = (float)height_ * 0.48f;
 
     // Resplandor táctil
-    renderHUDRect(bx - 6.0f, by - 6.0f, btnW + 12.0f, btnH + 12.0f, 0.08f, 0.35f, 0.65f, 0.70f);
-    renderHUDLine(bx - 6.0f, by - 6.0f, bx + btnW + 6.0f, by - 6.0f, 0.2f, 1.0f, 0.85f, 0.95f, 2.5f);
-    renderHUDLine(bx - 6.0f, by + btnH + 6.0f, bx + btnW + 6.0f, by + btnH + 6.0f, 0.2f, 1.0f, 0.85f, 0.95f, 2.5f);
-    renderHUDLine(bx - 6.0f, by - 6.0f, bx - 6.0f, by + btnH + 6.0f, 0.2f, 1.0f, 0.85f, 0.95f, 2.5f);
-    renderHUDLine(bx + btnW + 6.0f, by - 6.0f, bx + btnW + 6.0f, by + btnH + 6.0f, 0.2f, 1.0f, 0.85f, 0.95f, 2.5f);
+    renderHUDRect(bx - 5.0f, by - 5.0f, btnW + 10.0f, btnH + 10.0f, 0.06f, 0.25f, 0.45f, 0.75f);
+    renderHUDLine(bx - 5.0f, by - 5.0f, bx + btnW + 5.0f, by - 5.0f, 0.2f, 1.0f, 0.90f, 0.95f, 2.0f);
+    renderHUDLine(bx - 5.0f, by + btnH + 5.0f, bx + btnW + 5.0f, by + btnH + 5.0f, 0.2f, 1.0f, 0.90f, 0.95f, 2.0f);
+    renderHUDLine(bx - 5.0f, by - 5.0f, bx - 5.0f, by + btnH + 5.0f, 0.2f, 1.0f, 0.90f, 0.95f, 2.0f);
+    renderHUDLine(bx + btnW + 5.0f, by - 5.0f, bx + btnW + 5.0f, by + btnH + 5.0f, 0.2f, 1.0f, 0.90f, 0.95f, 2.0f);
 
     if (texBtnPlay_) {
         renderHUDQuad(bx, by, btnW, btnH, texBtnPlay_->getTextureID(), 1.0f);
     } else {
-        renderDigits(bx + 40.0f, by + 20.0f, 22.0f, 30.0f, "DESPEGAR");
+        renderDigits(bx + 30.0f, by + 18.0f, 22.0f, 28.0f, "DESPEGAR");
     }
 
     // 4. Indicador Parpadeante: "TOCA PARA INICIAR"
     float blink = 0.5f + 0.5f * std::sin(timeSec_ * 5.5f);
-    if (blink > 0.45f) {
-        float indW = 160.0f;
-        float ix = (width_ - indW) * 0.5f;
-        renderDigits(ix, by + btnH + 14.0f, 11.0f, 15.0f, "DESPEGAR");
+    if (blink > 0.40f) {
+        std::string tapStr = "TOCA PARA INICIAR";
+        float tw = tapStr.size() * 13.0f * 0.78f;
+        renderDigits(((float)width_ - tw) * 0.5f, by + btnH + 16.0f, 13.0f, 18.0f, tapStr);
     }
 
     // 5. Botón AYUDA / MANUAL (?)
-    float hBtnW = std::min(width_ * 0.65f, 240.0f);
+    float hBtnW = std::min((float)width_ * 0.72f, 260.0f);
     float hBtnH = 48.0f;
-    float hx = (width_ - hBtnW) * 0.5f;
-    float hy = by + btnH + 46.0f;
-    renderHUDRect(hx, hy, hBtnW, hBtnH, 0.06f, 0.16f, 0.28f, 0.85f);
+    float hx = ((float)width_ - hBtnW) * 0.5f;
+    float hy = by + btnH + 48.0f;
+    renderHUDRect(hx, hy, hBtnW, hBtnH, 0.05f, 0.15f, 0.28f, 0.85f);
     renderHUDLine(hx, hy, hx + hBtnW, hy, 0.0f, 0.75f, 0.95f, 0.80f, 1.5f);
     renderHUDLine(hx, hy + hBtnH, hx + hBtnW, hy + hBtnH, 0.0f, 0.75f, 0.95f, 0.80f, 1.5f);
     renderHUDLine(hx, hy, hx, hy + hBtnH, 0.0f, 0.75f, 0.95f, 0.80f, 1.5f);
     renderHUDLine(hx + hBtnW, hy, hx + hBtnW, hy + hBtnH, 0.0f, 0.75f, 0.95f, 0.80f, 1.5f);
 
     if (texBtnHelp_) {
-        renderHUDQuad(hx + 12.0f, hy + (hBtnH - 30.0f) * 0.5f, 30.0f, 30.0f, texBtnHelp_->getTextureID(), 0.95f);
+        renderHUDQuad(hx + 14.0f, hy + (hBtnH - 28.0f) * 0.5f, 28.0f, 28.0f, texBtnHelp_->getTextureID(), 0.95f);
     }
-    renderDigits(hx + 52.0f, hy + 14.0f, 12.0f, 18.0f, "AYUDA");
+    renderDigits(hx + 52.0f, hy + 14.0f, 13.0f, 20.0f, "MANUAL / AYUDA");
 
     // 6. Botón Sonido (Esquina superior derecha)
-    float sndX = width_ - 70.0f;
-    float sndY = 22.0f;
-    float sndSize = 52.0f;
+    float sndX = (float)width_ - 64.0f;
+    float sndY = 20.0f;
+    float sndSize = 48.0f;
     renderHUDRect(sndX - 4.0f, sndY - 4.0f, sndSize + 8.0f, sndSize + 8.0f, 0.05f, 0.15f, 0.25f, 0.75f);
     renderHUDLine(sndX - 4.0f, sndY - 4.0f, sndX + sndSize + 4.0f, sndY - 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
     renderHUDLine(sndX - 4.0f, sndY + sndSize + 4.0f, sndX + sndSize + 4.0f, sndY + sndSize + 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
     renderHUDLine(sndX - 4.0f, sndY - 4.0f, sndX - 4.0f, sndY + sndSize + 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
     renderHUDLine(sndX + sndSize + 4.0f, sndY - 4.0f, sndX + sndSize + 4.0f, sndY + sndSize + 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
     if (texBtnSound_) {
-        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.40f);
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.35f);
     }
 
     // 7. Récord de puntuación (Pie de pantalla)
-    float recordW = std::min(width_ * 0.78f, 280.0f);
-    float rx = (width_ - recordW) * 0.5f;
-    float ry = height_ - 64.0f;
-    renderHUDRect(rx, ry, recordW, 36.0f, 0.05f, 0.15f, 0.25f, 0.75f);
-    renderHUDLine(rx, ry, rx + recordW, ry, 0.0f, 0.85f, 0.95f, 0.9f, 2.0f);
-    std::string recStr = "RECORD X " + std::to_string(highScore_);
-    renderDigits(rx + 25.0f, ry + 6.0f, 16.0f, 22.0f, recStr);
+    float recordW = std::min((float)width_ * 0.85f, 300.0f);
+    float rx = ((float)width_ - recordW) * 0.5f;
+    float ry = (float)height_ - 62.0f;
+    renderHUDRect(rx, ry, recordW, 36.0f, 0.04f, 0.12f, 0.22f, 0.80f);
+    renderHUDLine(rx, ry, rx + recordW, ry, 0.0f, 0.85f, 0.95f, 0.9f, 1.8f);
+    renderHUDLine(rx, ry + 36.0f, rx + recordW, ry + 36.0f, 0.0f, 0.85f, 0.95f, 0.9f, 1.8f);
+    renderHUDLine(rx, ry, rx, ry + 36.0f, 0.0f, 0.85f, 0.95f, 0.9f, 1.8f);
+    renderHUDLine(rx + recordW, ry, rx + recordW, ry + 36.0f, 0.0f, 0.85f, 0.95f, 0.9f, 1.8f);
+    std::string recStr = "RECORD: " + std::to_string(highScore_) + " PTS";
+    float recW = recStr.size() * 14.0f * 0.78f;
+    renderDigits(((float)width_ - recW) * 0.5f, ry + 8.0f, 14.0f, 20.0f, recStr);
 
     // 8. Modal de Ayuda (Manual de vuelo y combate)
     if (showHelpModal_) {
-        renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.0f, 0.0f, 0.0f, 0.84f);
-        float dlgW = std::min(width_ * 0.94f, 560.0f);
+        renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.0f, 0.0f, 0.0f, 0.85f);
+        float dlgW = std::min((float)width_ * 0.94f, 540.0f);
         float dlgH = dlgW * (440.0f / 640.0f);
-        float dx = (width_ - dlgW) * 0.5f;
-        float dy = (height_ - dlgH) * 0.5f;
+        float dx = ((float)width_ - dlgW) * 0.5f;
+        float dy = ((float)height_ - dlgH) * 0.5f;
         if (texDialogHelp_) {
             renderHUDQuad(dx, dy, dlgW, dlgH, texDialogHelp_->getTextureID(), 1.0f);
         } else {
             renderHUDRect(dx, dy, dlgW, dlgH, 0.05f, 0.15f, 0.30f, 0.95f);
         }
-        renderDigits(dx + 30.0f, dy + dlgH + 16.0f, 12.0f, 16.0f, "TOCA PARA CERRAR");
+        std::string closeStr = "TOCA PARA CERRAR";
+        float cw = closeStr.size() * 14.0f * 0.78f;
+        renderDigits(((float)width_ - cw) * 0.5f, dy + dlgH + 16.0f, 14.0f, 20.0f, closeStr);
     }
 }
 
@@ -1674,10 +1718,10 @@ void Renderer::renderPauseUI() {
     // Fondo oscurecido
     renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.02f, 0.05f, 0.10f, 0.70f);
 
-    float dlgW = std::min(width_ * 0.88f, 380.0f);
+    float dlgW = std::min((float)width_ * 0.88f, 380.0f);
     float dlgH = 340.0f;
-    float dx = (width_ - dlgW) * 0.5f;
-    float dy = (height_ - dlgH) * 0.5f;
+    float dx = ((float)width_ - dlgW) * 0.5f;
+    float dy = ((float)height_ - dlgH) * 0.5f;
 
     if (texDialogPause_) {
         renderHUDQuad(dx, dy, dlgW, dlgH, texDialogPause_->getTextureID(), 1.0f);
@@ -1685,18 +1729,18 @@ void Renderer::renderPauseUI() {
         renderHUDRect(dx, dy, dlgW, dlgH, 0.05f, 0.15f, 0.28f, 0.92f);
     }
 
-    float btnW = dlgW * 0.78f, btnH = 54.0f;
-    float bx = (width_ - btnW) * 0.5f;
+    float btnW = dlgW * 0.82f, btnH = 50.0f;
+    float bx = ((float)width_ - btnW) * 0.5f;
 
     if (texBtnResume_)  renderHUDQuad(bx, dy + 105.0f, btnW, btnH, texBtnResume_->getTextureID(), 0.95f);
     if (texBtnRestart_) renderHUDQuad(bx, dy + 175.0f, btnW, btnH, texBtnRestart_->getTextureID(), 0.95f);
     if (texBtnQuit_)    renderHUDQuad(bx, dy + 245.0f, btnW, btnH, texBtnQuit_->getTextureID(), 0.95f);
 
     // Botón de sonido también disponible en pausa
-    float sndX = width_ - 70.0f, sndY = 22.0f, sndSize = 52.0f;
+    float sndX = (float)width_ - 64.0f, sndY = 20.0f, sndSize = 48.0f;
     renderHUDRect(sndX - 4.0f, sndY - 4.0f, sndSize + 8.0f, sndSize + 8.0f, 0.05f, 0.15f, 0.25f, 0.75f);
     if (texBtnSound_) {
-        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.40f);
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.35f);
     }
 }
 
@@ -1715,10 +1759,10 @@ void Renderer::renderGameOverUI() {
 
     renderHUDRect(0.0f, 0.0f, (float)width_, (float)height_, 0.12f, 0.02f, 0.02f, 0.75f);
 
-    float dlgW = std::min(width_ * 0.90f, 420.0f);
-    float dlgH = 360.0f;
-    float dx = (width_ - dlgW) * 0.5f;
-    float dy = (height_ - dlgH) * 0.5f;
+    float dlgW = std::min((float)width_ * 0.90f, 400.0f);
+    float dlgH = 340.0f;
+    float dx = ((float)width_ - dlgW) * 0.5f;
+    float dy = ((float)height_ - dlgH) * 0.5f;
 
     if (texDialogGameOver_) {
         renderHUDQuad(dx, dy, dlgW, dlgH, texDialogGameOver_->getTextureID(), 1.0f);
@@ -1726,17 +1770,19 @@ void Renderer::renderGameOverUI() {
         renderHUDRect(dx, dy, dlgW, dlgH, 0.25f, 0.05f, 0.05f, 0.95f);
     }
 
-    std::string scoreStr = "P " + std::to_string(enemiesDestroyed_ * 1500);
-    renderDigits((width_ - 140.0f) * 0.5f, dy + 115.0f, 16.0f, 22.0f, scoreStr);
+    std::string scoreStr = "PUNTOS: " + std::to_string(enemiesDestroyed_ * 1500);
+    float sw = scoreStr.size() * 14.0f * 0.78f;
+    renderDigits(((float)width_ - sw) * 0.5f, dy + 115.0f, 14.0f, 20.0f, scoreStr);
 
-    std::string killStr = "X " + std::to_string(enemiesDestroyed_);
-    renderDigits((width_ - 80.0f) * 0.5f, dy + 150.0f, 16.0f, 22.0f, killStr);
+    std::string killStr = "ENEMIGOS: " + std::to_string(enemiesDestroyed_);
+    float kw = killStr.size() * 14.0f * 0.78f;
+    renderDigits(((float)width_ - kw) * 0.5f, dy + 145.0f, 14.0f, 20.0f, killStr);
 
-    float btnW = dlgW * 0.78f, btnH = 54.0f;
-    float bx = (width_ - btnW) * 0.5f;
+    float btnW = dlgW * 0.80f, btnH = 50.0f;
+    float bx = ((float)width_ - btnW) * 0.5f;
 
-    if (texBtnRestart_) renderHUDQuad(bx, dy + 195.0f, btnW, btnH, texBtnRestart_->getTextureID(), 0.95f);
-    if (texBtnQuit_)    renderHUDQuad(bx, dy + 265.0f, btnW, btnH, texBtnQuit_->getTextureID(), 0.95f);
+    if (texBtnRestart_) renderHUDQuad(bx, dy + 190.0f, btnW, btnH, texBtnRestart_->getTextureID(), 0.95f);
+    if (texBtnQuit_)    renderHUDQuad(bx, dy + 255.0f, btnW, btnH, texBtnQuit_->getTextureID(), 0.95f);
 }
 
 void Renderer::renderGameUI() {
@@ -1752,14 +1798,14 @@ void Renderer::renderGameUI() {
 
     // 1. Retícula Táctica Central
     if (texHudCrosshair_) {
-        float reticleSize = 130.0f;
-        float rx = (width_ - reticleSize) * 0.5f;
-        float ry = (height_ - reticleSize) * 0.44f;
+        float reticleSize = 120.0f;
+        float rx = ((float)width_ - reticleSize) * 0.5f;
+        float ry = ((float)height_ - reticleSize) * 0.44f;
         renderHUDQuad(rx, ry, reticleSize, reticleSize, texHudCrosshair_->getTextureID(), targetLocked_ ? 1.0f : 0.85f);
 
         if (targetLocked_) {
-            float bSize = 18.0f;
-            float pad = 10.0f;
+            float bSize = 16.0f;
+            float pad = 8.0f;
             float bx0 = rx - pad;
             float by0 = ry - pad;
             float bx1 = rx + reticleSize + pad;
@@ -1774,15 +1820,19 @@ void Renderer::renderGameUI() {
             renderHUDLine(bx0, by1, bx0, by1 - bSize, r, g, b, a, 2.5f);
             renderHUDLine(bx1, by1, bx1 - bSize, by1, r, g, b, a, 2.5f);
             renderHUDLine(bx1, by1, bx1, by1 - bSize, r, g, b, a, 2.5f);
+
+            std::string lockStr = "[ENGANCHADO]";
+            float lsw = lockStr.size() * 11.0f * 0.78f;
+            renderDigits(((float)width_ - lsw) * 0.5f, by1 + 6.0f, 11.0f, 15.0f, lockStr);
         }
     }
 
-    // 2. Radar Táctico en Esquina Superior Izquierda
+    // 2. Radar Táctico en Esquina Superior Izquierda y Panel de Telemetría
+    float radarSize = 96.0f;
+    float rx = 16.0f;
+    float ry = 16.0f;
     if (texHudRadar_) {
-        float radarSize = 110.0f;
-        float rx = 18.0f;
-        float ry = 18.0f;
-        renderHUDQuad(rx, ry, radarSize, radarSize, texHudRadar_->getTextureID(), 0.90f);
+        renderHUDQuad(rx, ry, radarSize, radarSize, texHudRadar_->getTextureID(), 0.92f);
 
         float rcX = rx + radarSize * 0.5f;
         float rcY = ry + radarSize * 0.5f;
@@ -1793,10 +1843,10 @@ void Renderer::renderGameUI() {
         float swY = rcY + std::sin(sweepAngle) * radarRadius;
         renderHUDLine(rcX, rcY, swX, swY, 0.1f, 1.0f, 0.5f, 0.55f, 1.8f);
 
-        // Blip del jugador
+        // Blip del jugador (verde)
         renderHUDRect(rcX - 3.0f, rcY - 3.0f, 6.0f, 6.0f, 0.0f, 1.0f, 0.45f, 1.0f);
 
-        // Blip del buque
+        // Blip del buque (rojo pulsante)
         float relX = (targetX_ - planeX_) / 50.0f;
         float relZ = (targetZ_ - (-6.5f)) / 130.0f;
         float dist = std::sqrt(relX * relX + relZ * relZ);
@@ -1808,7 +1858,7 @@ void Renderer::renderGameUI() {
         float blipSize = 7.0f * (0.85f + 0.25f * blipPulse);
         renderHUDRect(blipX - blipSize * 0.5f, blipY - blipSize * 0.5f, blipSize, blipSize, 1.0f, 0.2f, 0.15f, blipPulse);
 
-        // Blips de cazas enemigos
+        // Blips de cazas enemigos (naranja)
         for (const auto& ej : enemyJets_) {
             if (!ej.active) continue;
             float erelX = (ej.x - planeX_) / 50.0f;
@@ -1821,26 +1871,63 @@ void Renderer::renderGameUI() {
         }
     }
 
-    // 3. Joystick Virtual Dinámico (Esquina Inferior Izquierda)
-    if (texBtnStick_) {
-        float baseCenterX = stickActive_ ? stickOriginX_ : (width_ * 0.24f);
-        float baseCenterY = stickActive_ ? stickOriginY_ : (height_ - 140.0f);
+    // Panel de Telemetría al costado del Radar
+    float telX = rx + radarSize + 12.0f;
+    renderDigits(telX, 18.0f, 11.0f, 15.0f, "BAJAS: " + std::to_string(enemiesDestroyed_));
+    renderDigits(telX, 36.0f, 11.0f, 15.0f, "PTS: " + std::to_string(enemiesDestroyed_ * 1500));
 
-        renderHUDQuad(baseCenterX - 55.0f, baseCenterY - 55.0f, 110.0f, 110.0f,
-                      texBtnStick_->getTextureID(), stickActive_ ? 0.95f : 0.45f);
+    float speedPct = CLAMP((speedKnots_ - 380.0f) / 200.0f, 0.0f, 1.0f);
+    renderDigits(telX, 54.0f, 9.0f, 13.0f, "VEL " + std::to_string((int)speedKnots_) + " KTS");
+    renderHUDBar(telX, 69.0f, 85.0f, 6.0f, speedPct, 0.0f, 0.9f, 0.85f, 0.9f);
 
-        float knobX = stickActive_ ? (stickKnobX_ - 28.0f) : (baseCenterX - 28.0f);
-        float knobY = stickActive_ ? (stickKnobY_ - 28.0f) : (baseCenterY - 28.0f);
-        renderHUDQuad(knobX, knobY, 56.0f, 56.0f,
-                      texBtnStick_->getTextureID(), stickActive_ ? 1.0f : 0.65f);
+    float altPct = CLAMP((altitudeFeet_ - 1500.0f) / 1800.0f, 0.0f, 1.0f);
+    renderDigits(telX, 78.0f, 9.0f, 13.0f, "ALT " + std::to_string((int)altitudeFeet_) + " FT");
+    renderHUDBar(telX, 93.0f, 85.0f, 6.0f, altPct, 0.0f, 0.85f, 1.0f, 0.9f);
+
+    // 3. Barra de Vida del Buque / Jefe (Centro Superior)
+    if (targetLocked_ || (targetZ_ > -110.0f && targetZ_ < 0.0f)) {
+        float bannerW = std::min((float)width_ * 0.48f, 200.0f);
+        float bannerX = ((float)width_ - bannerW) * 0.5f;
+        float bannerY = 16.0f;
+        std::string bossTitle = "JEFE: DDG-88";
+        float btw = bossTitle.size() * 10.0f * 0.78f;
+        renderDigits(((float)width_ - btw) * 0.5f, bannerY, 10.0f, 14.0f, bossTitle);
+
+        float tgtPct = CLAMP(targetHealth_ / targetMaxHealth_, 0.0f, 1.0f);
+        renderHUDBar(bannerX, bannerY + 16.0f, bannerW, 8.0f, tgtPct, 0.95f, 0.15f, 0.15f, 0.92f);
     }
 
-    // 4. Botones de Combate en Esquina Inferior Derecha (Diseño Cómodo y Táctil)
-    float fireBtnX = width_ - 95.0f, fireBtnY = height_ - 115.0f;
-    float mslBtnX = width_ - 95.0f, mslBtnY = height_ - 250.0f;
+    // 4. Joystick Virtual de Vuelo (Esquina Inferior Izquierda)
+    {
+        float baseCenterX = stickActive_ ? stickOriginX_ : ((float)width_ * 0.22f);
+        float baseCenterY = stickActive_ ? stickOriginY_ : ((float)height_ - 130.0f);
+        float knobCenterX = stickActive_ ? stickKnobX_ : baseCenterX;
+        float knobCenterY = stickActive_ ? stickKnobY_ : baseCenterY;
+
+        GLuint baseTexId = texBtnStickBase_ ? texBtnStickBase_->getTextureID() : (texBtnStick_ ? texBtnStick_->getTextureID() : 0);
+        GLuint knobTexId = texBtnStickKnob_ ? texBtnStickKnob_->getTextureID() : (texBtnStick_ ? texBtnStick_->getTextureID() : 0);
+
+        if (baseTexId) {
+            renderHUDQuad(baseCenterX - 55.0f, baseCenterY - 55.0f, 110.0f, 110.0f,
+                          baseTexId, stickActive_ ? 0.90f : 0.40f);
+        }
+
+        if (stickActive_) {
+            renderHUDLine(baseCenterX, baseCenterY, knobCenterX, knobCenterY, 0.0f, 0.85f, 1.0f, 0.60f, 2.0f);
+        }
+
+        if (knobTexId) {
+            renderHUDQuad(knobCenterX - 28.0f, knobCenterY - 28.0f, 56.0f, 56.0f,
+                          knobTexId, stickActive_ ? 0.98f : 0.65f);
+        }
+    }
+
+    // 5. Botones de Combate en Esquina Inferior Derecha
+    float fireBtnX = (float)width_ - 85.0f, fireBtnY = (float)height_ - 110.0f;
+    float mslBtnX = (float)width_ - 85.0f, mslBtnY = (float)height_ - 225.0f;
 
     if (texBtnFire_) {
-        float fireW = 115.0f;
+        float fireW = 98.0f;
         float fx = fireBtnX - (fireW * 0.5f);
         float fy = fireBtnY - (fireW * 0.5f);
         float alpha = firePressed_ ? 1.0f : 0.85f;
@@ -1848,16 +1935,16 @@ void Renderer::renderGameUI() {
     }
 
     if (texBtnMissile_) {
-        float mslW = 100.0f;
+        float mslW = 88.0f;
         float mx = mslBtnX - (mslW * 0.5f);
         float my = mslBtnY - (mslW * 0.5f);
         float alpha = (missileFlightTime_ > 0.0f || missilePressed_) ? 1.0f : 0.85f;
         renderHUDQuad(mx, my, mslW, mslW, texBtnMissile_->getTextureID(), alpha);
 
         // Indicador de Pips de Munición de Misiles
-        float pipGap = 4.0f;
+        float pipGap = 3.0f;
         float pipW = (mslW - (pipGap * 3.0f)) / 4.0f;
-        float pipH = 7.0f;
+        float pipH = 6.0f;
         float pipY = my + mslW + 3.0f;
 
         for (int i = 0; i < 4; ++i) {
@@ -1870,58 +1957,42 @@ void Renderer::renderGameUI() {
         }
     }
 
-    // 5. Barras de Telemetría HUD Superior
-    float speedPct = CLAMP((speedKnots_ - 380.0f) / 200.0f, 0.0f, 1.0f);
-    renderHUDBar(140.0f, 50.0f, 95.0f, 10.0f, speedPct, 0.0f, 0.9f, 0.8f, 0.9f);
+    // 6. Barra de Blindaje del Avión (Pie Central)
+    float hullBarW = std::min((float)width_ * 0.40f, 160.0f);
+    float hx = ((float)width_ - hullBarW) * 0.5f;
+    float hy = (float)height_ - 30.0f;
+    std::string armorStr = "BLINDAJE: " + std::to_string((int)(healthPct_ * 100.0f)) + "%";
+    float aw = armorStr.size() * 9.0f * 0.78f;
+    renderDigits(((float)width_ - aw) * 0.5f, hy - 14.0f, 9.0f, 13.0f, armorStr);
+    renderHUDBar(hx, hy, hullBarW, 7.0f, healthPct_,
+                 healthPct_ > 0.4f ? 0.2f : 0.95f,
+                 healthPct_ > 0.4f ? 0.95f : 0.25f,
+                 0.25f, 0.85f);
 
-    float altPct = CLAMP((altitudeFeet_ - 1500.0f) / 1800.0f, 0.0f, 1.0f);
-    renderHUDBar(140.0f, 66.0f, 95.0f, 10.0f, altPct, 0.0f, 0.85f, 1.0f, 0.9f);
-
-    // Barra de Blindaje del Avión
-    float hullBarW = std::min(width_ * 0.45f, 180.0f);
-    renderHUDBar((width_ - hullBarW) * 0.5f, height_ - 26.0f, hullBarW, 8.0f, healthPct_, 0.2f, 0.95f, 0.3f, 0.85f);
-
-    // Barra de Vida del Buque / Jefe
-    float bannerW = std::min(width_ * 0.55f, 220.0f);
-    float bannerX = (width_ - bannerW) * 0.5f;
-    float bannerY = 22.0f;
-    if (targetLocked_) {
-        float tgtPct = CLAMP(targetHealth_ / targetMaxHealth_, 0.0f, 1.0f);
-        renderHUDBar(bannerX, bannerY, bannerW, 12.0f, tgtPct, 0.95f, 0.15f, 0.15f, 0.92f);
-    }
-
-    // 6. Botones de Pausa y Sonido (Esquina Superior Derecha)
-    float pauseX = width_ - 70.0f;
-    float pauseY = 22.0f;
-    float pauseSize = 52.0f;
-    renderHUDRect(pauseX - 4.0f, pauseY - 4.0f, pauseSize + 8.0f, pauseSize + 8.0f, 0.05f, 0.15f, 0.25f, 0.75f);
-    renderHUDLine(pauseX - 4.0f, pauseY - 4.0f, pauseX + pauseSize + 4.0f, pauseY - 4.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
-    renderHUDLine(pauseX - 4.0f, pauseY + pauseSize + 4.0f, pauseX + pauseSize + 4.0f, pauseY + pauseSize + 4.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
-    renderHUDLine(pauseX - 4.0f, pauseY - 4.0f, pauseX - 4.0f, pauseY + pauseSize + 4.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
-    renderHUDLine(pauseX + pauseSize + 4.0f, pauseY - 4.0f, pauseX + pauseSize + 4.0f, pauseY + pauseSize + 4.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
+    // 7. Botones de Pausa y Sonido (Esquina Superior Derecha)
+    float pauseX = (float)width_ - 56.0f;
+    float pauseY = 16.0f;
+    float pauseSize = 44.0f;
+    renderHUDRect(pauseX - 3.0f, pauseY - 3.0f, pauseSize + 6.0f, pauseSize + 6.0f, 0.05f, 0.15f, 0.25f, 0.75f);
+    renderHUDLine(pauseX - 3.0f, pauseY - 3.0f, pauseX + pauseSize + 3.0f, pauseY - 3.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
+    renderHUDLine(pauseX - 3.0f, pauseY + pauseSize + 3.0f, pauseX + pauseSize + 3.0f, pauseY + pauseSize + 3.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
+    renderHUDLine(pauseX - 3.0f, pauseY - 3.0f, pauseX - 3.0f, pauseY + pauseSize + 3.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
+    renderHUDLine(pauseX + pauseSize + 3.0f, pauseY - 3.0f, pauseX + pauseSize + 3.0f, pauseY + pauseSize + 3.0f, 0.0f, 0.85f, 1.0f, 0.85f, 1.5f);
     if (texBtnPause_) {
         renderHUDQuad(pauseX, pauseY, pauseSize, pauseSize, texBtnPause_->getTextureID(), 0.95f);
     }
 
-    float sndX = width_ - 135.0f;
-    float sndY = 22.0f;
-    float sndSize = 52.0f;
-    renderHUDRect(sndX - 4.0f, sndY - 4.0f, sndSize + 8.0f, sndSize + 8.0f, 0.05f, 0.15f, 0.25f, 0.75f);
-    renderHUDLine(sndX - 4.0f, sndY - 4.0f, sndX + sndSize + 4.0f, sndY - 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
-    renderHUDLine(sndX - 4.0f, sndY + sndSize + 4.0f, sndX + sndSize + 4.0f, sndY + sndSize + 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
-    renderHUDLine(sndX - 4.0f, sndY - 4.0f, sndX - 4.0f, sndY + sndSize + 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
-    renderHUDLine(sndX + sndSize + 4.0f, sndY - 4.0f, sndX + sndSize + 4.0f, sndY + sndSize + 4.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
+    float sndX = pauseX - 52.0f;
+    float sndY = 16.0f;
+    float sndSize = 44.0f;
+    renderHUDRect(sndX - 3.0f, sndY - 3.0f, sndSize + 6.0f, sndSize + 6.0f, 0.05f, 0.15f, 0.25f, 0.75f);
+    renderHUDLine(sndX - 3.0f, sndY - 3.0f, sndX + sndSize + 3.0f, sndY - 3.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
+    renderHUDLine(sndX - 3.0f, sndY + sndSize + 3.0f, sndX + sndSize + 3.0f, sndY + sndSize + 3.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
+    renderHUDLine(sndX - 3.0f, sndY - 3.0f, sndX - 3.0f, sndY + sndSize + 3.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
+    renderHUDLine(sndX + sndSize + 3.0f, sndY - 3.0f, sndX + sndSize + 3.0f, sndY + sndSize + 3.0f, 0.0f, 0.8f, 1.0f, 0.8f, 1.5f);
     if (texBtnSound_) {
-        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.40f);
+        renderHUDQuad(sndX, sndY, sndSize, sndSize, texBtnSound_->getTextureID(), soundEnabled_ ? 0.98f : 0.35f);
     }
-
-    // 7. Contadores Digitales
-    std::string killStr = "X " + std::to_string(enemiesDestroyed_);
-    renderDigits(140.0f, 24.0f, 13.0f, 18.0f, killStr);
-
-    int totalScore = enemiesDestroyed_ * 1500;
-    std::string scoreStr = "P " + std::to_string(totalScore);
-    renderDigits(18.0f, 136.0f, 12.0f, 16.0f, scoreStr);
 }
 
 void Renderer::renderWhisk3D() {
@@ -2034,9 +2105,9 @@ void Renderer::renderWhisk3D() {
 
         // Avance del buque enemigo
         targetZ_ += 0.26f;
-        if (targetZ_ > 10.0f) {
-            targetZ_ = -140.0f;
-            targetX_ = std::sin(timeSec_ * 0.6f) * 18.0f;
+        if (targetZ_ > -2.0f) {
+            targetZ_ = -150.0f;
+            targetX_ = std::sin(timeSec_ * 0.6f) * 16.0f;
             targetHealth_ = targetMaxHealth_;
         }
 
@@ -2297,7 +2368,7 @@ void Renderer::renderWhisk3D() {
 void Renderer::render() {
     updateRenderArea();
 
-    w3dEngine::ClearColor(0.06f, 0.12f, 0.22f, 1.0f);
+    w3dEngine::ClearColor(0.07f, 0.27f, 0.62f, 1.0f);
     w3dEngine::Clear(w3dEngine::ColorBuffer | w3dEngine::DepthBuffer);
 
     renderWhisk3D();

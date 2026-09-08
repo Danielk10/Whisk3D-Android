@@ -219,6 +219,8 @@ private:
     std::shared_ptr<TextureAsset> texBtnFire_;
     std::shared_ptr<TextureAsset> texBtnMissile_;
     std::shared_ptr<TextureAsset> texBtnStick_;
+    std::shared_ptr<TextureAsset> texBtnStickBase_;
+    std::shared_ptr<TextureAsset> texBtnStickKnob_;
     std::shared_ptr<TextureAsset> texBtnSound_;
 
     // Menu UI Textures
